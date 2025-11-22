@@ -104,12 +104,6 @@ Rank 21+          ░░░░░░░░  Gray       #4A4A4A
 | =h=   | =blame-reveal-show-file-history=   | File log     |
 | =l=   | =blame-reveal-show-line-history=   | Line log     |
 
-*** Magit Integration
-
-#+begin_src elisp
-(setq blame-reveal-use-magit 'auto)  ; auto, t, or nil
-#+end_src
-
 ** Installation
 
 *Manual*
@@ -144,7 +138,23 @@ M-x blame-reveal-mode
 (setq blame-reveal-display-style 'background)   ; 'background, 'box, 'inverse
 #+end_src
 
-* Color Scheme
+*** Typography
+
+#+begin_src elisp
+;; Commit message line
+(setq blame-reveal-header-weight 'bold          ; 'bold, 'normal, 'semi-bold, 'extra-bold
+      blame-reveal-header-height 1.0)           ; 1.0 = default size
+
+;; Metadata line (hash, author, date)
+(setq blame-reveal-metadata-weight 'normal      ; 'bold, 'normal, 'semi-bold, 'light
+      blame-reveal-metadata-height 0.9)         ; 0.9 = 90% of default
+
+;; Description lines
+(setq blame-reveal-description-weight 'normal   ; 'bold, 'normal, 'semi-bold, 'light
+      blame-reveal-description-height 0.9)      ; 0.9 = 90% of default
+#+end_src
+
+*** Color Scheme
 
 The gradient color scheme for recent commits uses HSL (Hue, Saturation, Lightness) parameters:
 
@@ -197,7 +207,7 @@ The gradient color scheme for recent commits uses HSL (Hue, Saturation, Lightnes
 - Oldest recent commit gets lowest saturation + theme-appropriate lightness
 - Ease-out curve makes newest commits stand out more
 
-* Commit Selection
+*** Commit Selection
 
 #+begin_src elisp
 (setq blame-reveal-recent-commit-count 20)      ; Default: 20
@@ -222,7 +232,7 @@ The gradient color scheme for recent commits uses HSL (Hue, Saturation, Lightnes
       blame-reveal-recent-days-limit nil)
 #+end_src
 
-* Color Overrides
+*** Color Overrides
 
 Override automatic gradient with fixed colors:
 
@@ -243,27 +253,17 @@ Override automatic gradient with fixed colors:
 
 /Note:/ =blame-reveal-color-scheme= is ignored when =blame-reveal-recent-commit-color= is set to a fixed color or function.
 
-* Typography
-
-#+begin_src elisp
-;; Commit message line
-(setq blame-reveal-header-weight 'bold
-      blame-reveal-header-height 1.0)
-
-;; Metadata line (hash, author, date)
-(setq blame-reveal-metadata-weight 'normal
-      blame-reveal-metadata-height 0.9)
-
-;; Description lines
-(setq blame-reveal-description-weight 'normal
-      blame-reveal-description-height 0.9)
-#+end_src
-
-* Performance
+*** Performance
 
 #+begin_src elisp
 (setq blame-reveal-render-margin 50)            ; Lines beyond viewport
 (setq blame-reveal-temp-overlay-delay 0.05)     ; Old commit overlay delay (seconds)
+#+end_src
+
+*** Magit Integration
+
+#+begin_src elisp
+(setq blame-reveal-use-magit 'auto)  ; auto, t, or nil
 #+end_src
 
 ** How It Works

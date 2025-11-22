@@ -15,7 +15,9 @@
 
 (require 'vc-git)
 
-;; Define a filled fringe bitmap (no gaps between lines)
+
+;;;; Fringe Bitmap Definition
+
 (define-fringe-bitmap 'blame-reveal-full
   [#b11111111
    #b11111111
@@ -34,6 +36,9 @@
    #b11111111
    #b11111111]
   16 8 'center)
+
+
+;;;; Keymaps and Variables
 
 (defvar blame-reveal-mode-map
   (let ((map (make-sparse-keymap)))
@@ -64,6 +69,36 @@
 (defvar-local blame-reveal--header-overlay nil
   "Overlay for the currently displayed header.")
 
+(defvar-local blame-reveal--overlays nil
+  "List of overlays used for blame display.")
+
+(defvar-local blame-reveal--color-map nil
+  "Hash table mapping commit hash to color.")
+
+(defvar-local blame-reveal--commit-info nil
+  "Hash table mapping commit hash to info (author, date, summary, timestamp).")
+
+(defvar-local blame-reveal--blame-data nil
+  "Cached blame data for the entire file.")
+
+(defvar-local blame-reveal--last-window-start nil
+  "Last window start position to detect scrolling.")
+
+(defvar-local blame-reveal--loading nil
+  "Flag to indicate if blame data is being loaded.")
+
+(defvar-local blame-reveal--timestamps nil
+  "Cached min/max timestamps for color calculation.")
+
+(defvar-local blame-reveal--temp-old-overlays nil
+  "Temporary overlays for old commit blocks when cursor is on them.")
+
+(defvar-local blame-reveal--recent-commits nil
+  "List of recent commit hashes (most recent first) to colorize.")
+
+
+;;;; Customization Group
+
 (defgroup blame-reveal nil
   "Show git blame in fringe with colors.
 
@@ -79,6 +114,9 @@ Common customizations:
 See all options: M-x customize-group RET blame-reveal"
   :group 'vc
   :prefix "blame-reveal-")
+
+
+;;;; Display Customization
 
 (defcustom blame-reveal-style 'left-fringe
   "Which fringe to use for blame indicators."
@@ -106,74 +144,9 @@ See all options: M-x customize-group RET blame-reveal"
                  (const inverse))
   :group 'blame-reveal)
 
-(defcustom blame-reveal-render-margin 50
-  "Number of lines to render above and below visible window."
-  :type 'integer
-  :group 'blame-reveal)
 
-(defcustom blame-reveal-recent-commit-count 10
-  "Number of most recent unique commits to highlight with colors.
-Only the N most recent commits in the file will be shown with age-based
-gradient colors, AND they must be within `blame-reveal-recent-days-limit'.
-Older commits will be shown in gray (or when cursor is on them).
+;;;; Typography Customization
 
-For active projects, you may want to increase this (e.g., 30-50).
-For inactive projects, a smaller number (e.g., 5-10) may be sufficient."
-  :type 'integer
-  :group 'blame-reveal)
-
-(defcustom blame-reveal-recent-days-limit 90
-  "Maximum age in days for a commit to be considered 'recent'.
-Even if a commit is in the top N most recent commits, it will only
-be colorized if it's within this many days. Set to nil to disable
-the time limit (only use commit count).
-
-Common values:
-- 30: Only show commits from last month
-- 90: Show commits from last quarter (default)
-- 180: Show commits from last half year
-- nil: No time limit, only use commit count"
-  :type '(choice (const :tag "No time limit" nil)
-                 (integer :tag "Days"))
-  :group 'blame-reveal)
-
-(defcustom blame-reveal-auto-expand-recent t
-  "Automatically expand recent commit count to include all commits within time limit.
-When t, if there are more than N commits within the time limit,
-all of them will be shown (ignoring the commit count limit).
-When nil, strictly use the commit count limit."
-  :type 'boolean
-  :group 'blame-reveal)
-
-(defcustom blame-reveal-recent-commit-color nil
-  "Color for recent commits (within top N and time limit).
-If nil, uses automatic gradient based on commit rank.
-Can be:
-- nil: Auto gradient (continuous gradient based on rank)
-- Color string: Fixed color like \"#6699cc\" for all recent commits
-- Function: Takes timestamp, returns color for custom gradient logic"
-  :type '(choice (const :tag "Auto (gradient based on rank)" nil)
-                 (color :tag "Fixed color")
-                 (function :tag "Function (timestamp -> color)"))
-  :group 'blame-reveal)
-
-(defcustom blame-reveal-old-commit-color nil
-  "Color for old commits (not in top N or beyond time limit).
-If nil, uses automatic gray color based on theme (dark theme: #4a4a4a, light theme: #d0d0d0).
-Set to a color string like \"#888888\" to use a fixed color."
-  :type '(choice (const :tag "Auto (theme-based gray)" nil)
-                 (color :tag "Fixed color"))
-  :group 'blame-reveal)
-
-(defcustom blame-reveal-temp-overlay-delay 0.05
-  "Delay in seconds before rendering temp overlays for old commits.
-Lower values (e.g., 0.02) make overlays appear faster but may cause lag
-when moving cursor quickly. Higher values (e.g., 0.1) reduce lag but
-overlays appear with more delay."
-  :type 'number
-  :group 'blame-reveal)
-
-;; Header styling customization
 (defcustom blame-reveal-header-weight 'bold
   "Font weight for the commit message line in blame header."
   :type '(choice (const :tag "Bold" bold)
@@ -216,24 +189,74 @@ overlays appear with more delay."
   :type 'number
   :group 'blame-reveal)
 
-(defcustom blame-reveal-use-magit 'auto
-  "Whether to use magit for showing commit details.
-- 'auto: Use magit if available, otherwise use built-in
-- t: Always use magit (error if not available)
-- nil: Always use built-in git commands"
-  :type '(choice (const :tag "Auto (use magit if available)" auto)
-                 (const :tag "Always use magit" t)
-                 (const :tag "Always use built-in" nil))
+
+;;;; Commit Selection Customization
+
+(defcustom blame-reveal-recent-commit-count 10
+  "Number of most recent unique commits to highlight with colors.
+Only the N most recent commits in the file will be shown with age-based
+gradient colors, AND they must be within `blame-reveal-recent-days-limit'.
+Older commits will be shown in gray (or when cursor is on them).
+
+For active projects, you may want to increase this (e.g., 30-50).
+For inactive projects, a smaller number (e.g., 5-10) may be sufficient."
+  :type 'integer
+  :group 'blame-reveal)
+
+(defcustom blame-reveal-recent-days-limit 90
+  "Maximum age in days for a commit to be considered 'recent'.
+Even if a commit is in the top N most recent commits, it will only
+be colorized if it's within this many days. Set to nil to disable
+the time limit (only use commit count).
+
+Common values:
+- 30: Only show commits from last month
+- 90: Show commits from last quarter (default)
+- 180: Show commits from last half year
+- nil: No time limit, only use commit count"
+  :type '(choice (const :tag "No time limit" nil)
+                 (integer :tag "Days"))
+  :group 'blame-reveal)
+
+(defcustom blame-reveal-auto-expand-recent t
+  "Automatically expand recent commit count to include all commits within time limit.
+When t, if there are more than N commits within the time limit,
+all of them will be shown (ignoring the commit count limit).
+When nil, strictly use the commit count limit."
+  :type 'boolean
+  :group 'blame-reveal)
+
+
+;;;; Color Customization
+
+(defcustom blame-reveal-recent-commit-color nil
+  "Color for recent commits (within top N and time limit).
+If nil, uses automatic gradient based on commit rank.
+Can be:
+- nil: Auto gradient (continuous gradient based on rank)
+- Color string: Fixed color like \"#6699cc\" for all recent commits
+- Function: Takes timestamp, returns color for custom gradient logic"
+  :type '(choice (const :tag "Auto (gradient based on rank)" nil)
+                 (color :tag "Fixed color")
+                 (function :tag "Function (timestamp -> color)"))
+  :group 'blame-reveal)
+
+(defcustom blame-reveal-old-commit-color nil
+  "Color for old commits (not in top N or beyond time limit).
+If nil, uses automatic gray color based on theme (dark theme: #4a4a4a, light theme: #d0d0d0).
+Set to a color string like \"#888888\" to use a fixed color."
+  :type '(choice (const :tag "Auto (theme-based gray)" nil)
+                 (color :tag "Fixed color"))
   :group 'blame-reveal)
 
 (defcustom blame-reveal-color-scheme
-  '(:hue 210                    ; Hue value (0-360): 210=blue, 120=green, 0=red, 280=purple
-         :dark-newest 0.70           ; Lightness for newest commits in dark theme (higher = brighter)
-         :dark-oldest 0.35           ; Lightness for oldest commits in dark theme (lower = dimmer)
-         :light-newest 0.45          ; Lightness for newest commits in light theme (lower = darker)
-         :light-oldest 0.75          ; Lightness for oldest commits in light theme (higher = lighter)
-         :saturation-min 0.25        ; Minimum saturation (0.0-1.0, for oldest commits)
-         :saturation-max 0.60)       ; Maximum saturation (0.0-1.0, for newest commits)
+  '(:hue 210
+         :dark-newest 0.70
+         :dark-oldest 0.35
+         :light-newest 0.45
+         :light-oldest 0.75
+         :saturation-min 0.25
+         :saturation-max 0.60)
   "Color scheme for blame visualization.
 All lightness values are between 0.0 and 1.0.
 
@@ -275,102 +298,37 @@ Example schemes:
                  (blame-reveal--recolor-and-render))))))
   :group 'blame-reveal)
 
-(defvar-local blame-reveal--overlays nil
-  "List of overlays used for blame display.")
 
-(defvar-local blame-reveal--color-map nil
-  "Hash table mapping commit hash to color.")
+;;;; Performance Customization
 
-(defvar-local blame-reveal--commit-info nil
-  "Hash table mapping commit hash to info (author, date, summary, timestamp).")
+(defcustom blame-reveal-render-margin 50
+  "Number of lines to render above and below visible window."
+  :type 'integer
+  :group 'blame-reveal)
 
-(defvar-local blame-reveal--blame-data nil
-  "Cached blame data for the entire file.")
+(defcustom blame-reveal-temp-overlay-delay 0.05
+  "Delay in seconds before rendering temp overlays for old commits.
+Lower values (e.g., 0.02) make overlays appear faster but may cause lag
+when moving cursor quickly. Higher values (e.g., 0.1) reduce lag but
+overlays appear with more delay."
+  :type 'number
+  :group 'blame-reveal)
 
-(defvar-local blame-reveal--last-window-start nil
-  "Last window start position to detect scrolling.")
 
-(defvar-local blame-reveal--loading nil
-  "Flag to indicate if blame data is being loaded.")
+;;;; Integration Customization
 
-(defvar-local blame-reveal--timestamps nil
-  "Cached min/max timestamps for color calculation.")
+(defcustom blame-reveal-use-magit 'auto
+  "Whether to use magit for showing commit details.
+- 'auto: Use magit if available, otherwise use built-in
+- t: Always use magit (error if not available)
+- nil: Always use built-in git commands"
+  :type '(choice (const :tag "Auto (use magit if available)" auto)
+                 (const :tag "Always use magit" t)
+                 (const :tag "Always use built-in" nil))
+  :group 'blame-reveal)
 
-(defvar-local blame-reveal--temp-old-overlays nil
-  "Temporary overlays for old commit blocks when cursor is on them.")
 
-(defvar-local blame-reveal--recent-commits nil
-  "List of recent commit hashes (most recent first) to colorize.")
-
-(defvar-local blame-reveal--all-commits-loaded nil
-  "Flag indicating if all commits info has been loaded.")
-
-(defun blame-reveal--should-use-magit-p ()
-  "Check if magit should be used based on configuration."
-  (pcase blame-reveal-use-magit
-    ('auto (and (fboundp 'magit-show-commit)
-                (fboundp 'magit-log-buffer-file)))
-    ('t (if (and (fboundp 'magit-show-commit)
-                 (fboundp 'magit-log-buffer-file))
-            t
-          (error "Magit is not available but blame-reveal-use-magit is set to t")))
-    (_ nil)))
-
-(defun blame-reveal--on-theme-change (&rest _)
-  "Handle theme change event and refresh all blame displays."
-  (when blame-reveal--theme-change-timer
-    (cancel-timer blame-reveal--theme-change-timer))
-  (setq blame-reveal--theme-change-timer
-        (run-with-timer 0.3 nil
-                        (lambda ()
-                          (let ((current-buf (current-buffer))
-                                (current-point (point)))
-                            (dolist (buffer (buffer-list))
-                              (with-current-buffer buffer
-                                (when blame-reveal-mode
-                                  ;; Re-render fringe overlays with new theme colors
-                                  (blame-reveal--recolor-and-render))))
-
-                            ;; Refresh header in current buffer if it exists
-                            (when (buffer-live-p current-buf)
-                              (with-current-buffer current-buf
-                                (when (and blame-reveal-mode
-                                           blame-reveal--current-block-commit)
-                                  (save-excursion
-                                    (goto-char current-point)
-                                    ;; Force header refresh by clearing and re-triggering
-                                    (let ((old-commit blame-reveal--current-block-commit))
-                                      (setq blame-reveal--current-block-commit nil)
-                                      ;; Clear existing header
-                                      (when blame-reveal--header-overlay
-                                        (delete-overlay blame-reveal--header-overlay)
-                                        (setq blame-reveal--header-overlay nil))
-                                      ;; Clear temp overlays
-                                      (blame-reveal--clear-temp-overlays)
-                                      ;; Re-trigger header update
-                                      (blame-reveal--update-header)))))))))))
-
-(defun blame-reveal--setup-theme-advice ()
-  "Setup advice to monitor theme changes."
-  (if (boundp 'after-enable-theme-hook)
-      ;; Use official hook for Emacs 29+
-      (add-hook 'after-enable-theme-hook #'blame-reveal--on-theme-change)
-    ;; Use advice for older Emacs versions
-    (advice-add 'load-theme :after #'blame-reveal--on-theme-change)
-    (advice-add 'enable-theme :after #'blame-reveal--on-theme-change)
-    (advice-add 'disable-theme :after #'blame-reveal--on-theme-change)))
-
-(defun blame-reveal--remove-theme-advice ()
-  "Remove theme change advice."
-  (when blame-reveal--theme-change-timer
-    (cancel-timer blame-reveal--theme-change-timer)
-    (setq blame-reveal--theme-change-timer nil))
-
-  (if (boundp 'after-enable-theme-hook)
-      (remove-hook 'after-enable-theme-hook #'blame-reveal--on-theme-change)
-    (advice-remove 'load-theme #'blame-reveal--on-theme-change)
-    (advice-remove 'enable-theme #'blame-reveal--on-theme-change)
-    (advice-remove 'disable-theme #'blame-reveal--on-theme-change)))
+;;;; Git Blame Data Functions
 
 (defun blame-reveal--get-blame-data ()
   "Get git blame data for current buffer.
@@ -426,6 +384,9 @@ Returns (SHORT-HASH AUTHOR DATE SUMMARY TIMESTAMP DESCRIPTION)."
                     (min (car blame-reveal--timestamps) timestamp))
             (setcdr blame-reveal--timestamps
                     (max (cdr blame-reveal--timestamps) timestamp))))))))
+
+
+;;;; Color Calculation Functions
 
 (defun blame-reveal--is-dark-theme-p ()
   "Check if current theme is dark based on default background."
@@ -493,10 +454,6 @@ Returns nil if commit is not in recent list."
                           (- oldest (* (- oldest newest) (- 1.0 eased-ratio)))))))
       (blame-reveal--hsl-to-hex hue saturation lightness))))
 
-(defun blame-reveal--is-recent-commit-p (commit-hash)
-  "Check if COMMIT-HASH is one of the recent commits to colorize."
-  (member commit-hash blame-reveal--recent-commits))
-
 (defun blame-reveal--timestamp-to-color (timestamp commit-hash)
   "Convert TIMESTAMP to color based on commit age.
 
@@ -543,6 +500,85 @@ For commits in recent list (in top N AND within time limit):
                       "#6699cc")))
         (puthash commit-hash color blame-reveal--color-map)
         color)))
+
+
+;;;; Commit Selection Functions
+
+(defun blame-reveal--is-recent-commit-p (commit-hash)
+  "Check if COMMIT-HASH is one of the recent commits to colorize."
+  (member commit-hash blame-reveal--recent-commits))
+
+(defun blame-reveal--get-unique-commits ()
+  "Get list of unique commit hashes in current file (in order of first appearance)."
+  (when blame-reveal--blame-data
+    (let ((commits nil)
+          (seen (make-hash-table :test 'equal)))
+      (dolist (entry blame-reveal--blame-data)
+        (let ((commit (cdr entry)))
+          (unless (gethash commit seen)
+            (puthash commit t seen)
+            (push commit commits))))
+      (nreverse commits))))
+
+(defun blame-reveal--update-recent-commits ()
+  "Update the list of recent commits based on currently loaded info.
+A commit is considered recent based on `blame-reveal-auto-expand-recent`:
+
+When auto-expand is t:
+  All commits within time limit are included (ignoring count limit)
+
+When auto-expand is nil:
+  1. Must be in top N commits, AND
+  2. Must be within time limit (if set)"
+  (when blame-reveal--commit-info
+    (let ((commit-timestamps nil)
+          (current-time (float-time)))
+      ;; Collect all commits with loaded timestamps
+      (maphash (lambda (commit info)
+                 (when-let ((timestamp (nth 4 info)))
+                   (push (cons commit timestamp) commit-timestamps)))
+               blame-reveal--commit-info)
+
+      ;; Sort by timestamp (newest first)
+      (setq commit-timestamps
+            (sort commit-timestamps
+                  (lambda (a b) (> (cdr a) (cdr b)))))
+
+      (let ((recent-commits nil))
+        (if blame-reveal-auto-expand-recent
+            ;; Auto-expand mode: include all commits within time limit
+            (if blame-reveal-recent-days-limit
+                (let ((age-limit-seconds (* blame-reveal-recent-days-limit 86400)))
+                  ;; Take all commits within time limit
+                  (setq recent-commits
+                        (cl-remove-if
+                         (lambda (commit-ts)
+                           (> (- current-time (cdr commit-ts))
+                              age-limit-seconds))
+                         commit-timestamps)))
+              ;; No time limit: take top N
+              (setq recent-commits
+                    (seq-take commit-timestamps
+                              blame-reveal-recent-commit-count)))
+
+          ;; Strict mode: top N AND within time limit
+          (setq recent-commits
+                (seq-take commit-timestamps
+                          blame-reveal-recent-commit-count))
+          (when blame-reveal-recent-days-limit
+            (let ((age-limit-seconds (* blame-reveal-recent-days-limit 86400)))
+              (setq recent-commits
+                    (cl-remove-if
+                     (lambda (commit-ts)
+                       (> (- current-time (cdr commit-ts))
+                          age-limit-seconds))
+                     recent-commits)))))
+
+        (setq blame-reveal--recent-commits
+              (mapcar #'car recent-commits))))))
+
+
+;;;; Overlay Management Functions
 
 (defun blame-reveal--find-block-boundaries (blame-data &optional start-line end-line)
   "Find boundaries of same-commit blocks in BLAME-DATA.
@@ -744,145 +780,37 @@ COLOR is the fringe color, which will also be used for header text foreground."
     (setq blame-reveal--header-overlay nil))
   (setq blame-reveal--current-block-commit nil))
 
+(defun blame-reveal--clear-temp-overlays ()
+  "Clear temporary overlays for old commits."
+  (dolist (overlay blame-reveal--temp-old-overlays)
+    (when (overlay-buffer overlay)
+      (delete-overlay overlay)))
+  (setq blame-reveal--temp-old-overlays nil))
+
+
+;;;; Rendering Functions
+
 (defun blame-reveal--should-render-commit (commit-hash)
   "Check if a commit should be rendered in permanent layer.
 Only recent commits (top N by recency among loaded commits) are permanently visible."
   (blame-reveal--is-recent-commit-p commit-hash))
 
-(defun blame-reveal--get-unique-commits ()
-  "Get list of unique commit hashes in current file (in order of first appearance)."
-  (when blame-reveal--blame-data
-    (let ((commits nil)
-          (seen (make-hash-table :test 'equal)))
-      (dolist (entry blame-reveal--blame-data)
-        (let ((commit (cdr entry)))
-          (unless (gethash commit seen)
-            (puthash commit t seen)
-            (push commit commits))))
-      (nreverse commits))))
-
-(defun blame-reveal--update-recent-commits ()
-  "Update the list of recent commits based on currently loaded info.
-A commit is considered recent based on `blame-reveal-auto-expand-recent`:
-
-When auto-expand is t:
-  All commits within time limit are included (ignoring count limit)
-
-When auto-expand is nil:
-  1. Must be in top N commits, AND
-  2. Must be within time limit (if set)"
-  (when blame-reveal--commit-info
-    (let ((commit-timestamps nil)
-          (current-time (float-time)))
-      ;; Collect all commits with loaded timestamps
-      (maphash (lambda (commit info)
-                 (when-let ((timestamp (nth 4 info)))
-                   (push (cons commit timestamp) commit-timestamps)))
-               blame-reveal--commit-info)
-
-      ;; Sort by timestamp (newest first)
-      (setq commit-timestamps
-            (sort commit-timestamps
-                  (lambda (a b) (> (cdr a) (cdr b)))))
-
-      (let ((recent-commits nil))
-        (if blame-reveal-auto-expand-recent
-            ;; Auto-expand mode: include all commits within time limit
-            (if blame-reveal-recent-days-limit
-                (let ((age-limit-seconds (* blame-reveal-recent-days-limit 86400)))
-                  ;; Take all commits within time limit
-                  (setq recent-commits
-                        (cl-remove-if
-                         (lambda (commit-ts)
-                           (> (- current-time (cdr commit-ts))
-                              age-limit-seconds))
-                         commit-timestamps)))
-              ;; No time limit: take top N
-              (setq recent-commits
-                    (seq-take commit-timestamps
-                              blame-reveal-recent-commit-count)))
-
-          ;; Strict mode: top N AND within time limit
-          (setq recent-commits
-                (seq-take commit-timestamps
-                          blame-reveal-recent-commit-count))
-          (when blame-reveal-recent-days-limit
-            (let ((age-limit-seconds (* blame-reveal-recent-days-limit 86400)))
-              (setq recent-commits
-                    (cl-remove-if
-                     (lambda (commit-ts)
-                       (> (- current-time (cdr commit-ts))
-                          age-limit-seconds))
-                     recent-commits)))))
-
-        (setq blame-reveal--recent-commits
-              (mapcar #'car recent-commits))))))
-
-(defun blame-reveal--load-commits-incrementally ()
-  "Load commit info incrementally in background.
-First loads info for visible commits, then loads rest in batches."
-  (when (and blame-reveal--blame-data
-             (not blame-reveal--all-commits-loaded))
-    (let* ((range (blame-reveal--get-visible-line-range))
-           (start-line (car range))
-           (end-line (cdr range))
-           (visible-blocks (blame-reveal--find-block-boundaries
-                            blame-reveal--blame-data
-                            start-line
-                            end-line))
-           (visible-commits (mapcar #'cadr visible-blocks))
-           (all-commits (blame-reveal--get-unique-commits))
-           (remaining-commits (cl-remove-if
-                               (lambda (c) (member c visible-commits))
-                               all-commits)))
-
-      ;; Phase 1: Load visible commits immediately (synchronously)
-      (dolist (commit visible-commits)
-        (blame-reveal--ensure-commit-info commit))
-
-      ;; Phase 2: Load remaining commits in background batches
-      (when remaining-commits
-        (run-with-idle-timer
-         0.1 nil
-         (lambda (buffer commits)
-           (when (buffer-live-p buffer)
-             (with-current-buffer buffer
-               (when blame-reveal-mode
-                 (blame-reveal--load-commits-batch commits 0)))))
-         (current-buffer) remaining-commits)))))
-
-(defun blame-reveal--load-commits-batch (commits batch-start)
-  "Load a batch of COMMITS starting from BATCH-START index."
-  (let* ((batch-size 20)  ; Load 20 commits per batch
-         (batch-end (min (+ batch-start batch-size) (length commits)))
-         (batch (seq-subseq commits batch-start batch-end))
-         (old-recent-commits blame-reveal--recent-commits))
-
-    ;; Load this batch
-    (dolist (commit batch)
-      (blame-reveal--ensure-commit-info commit))
-
-    ;; Update recent commits list after each batch
-    (blame-reveal--update-recent-commits)
-
-    ;; Only re-render if the recent commits list changed
-    ;; This means a newly loaded commit entered the top N
-    (unless (equal old-recent-commits blame-reveal--recent-commits)
-      (blame-reveal--render-visible-region))
-
-    ;; Schedule next batch
-    (if (< batch-end (length commits))
-        (run-with-idle-timer
-         0.05 nil  ; Small delay between batches
-         (lambda (buffer commits-list next-start)
-           (when (buffer-live-p buffer)
-             (with-current-buffer buffer
-               (when blame-reveal-mode
-                 (blame-reveal--load-commits-batch commits-list next-start)))))
-         (current-buffer) commits batch-end)
-      ;; All done
-      (setq blame-reveal--all-commits-loaded t)
-      (message "Git blame: loaded %d commits" (length commits)))))
+(defun blame-reveal--render-block-fringe (block-start block-length commit-hash color)
+  "Render fringe for a specific block.
+Returns list of created overlays."
+  (let ((overlays nil)
+        (range (blame-reveal--get-visible-line-range))
+        (block-end (+ block-start block-length -1)))
+    (let ((render-start (max block-start (car range)))
+          (render-end (min block-end (cdr range))))
+      (when (<= render-start render-end)
+        (dotimes (i (- render-end render-start -1))
+          (let* ((line-num (+ render-start i))
+                 (fringe-ov (blame-reveal--create-fringe-overlay
+                             line-num color commit-hash)))
+            (when fringe-ov
+              (push fringe-ov overlays))))))
+    overlays))
 
 (defun blame-reveal--render-visible-region ()
   "Render git blame fringe for visible region only."
@@ -922,22 +850,81 @@ First loads info for visible commits, then loads rest in batches."
       ;; Re-trigger header update
       (blame-reveal--update-header))))
 
-(defun blame-reveal--render-block-fringe (block-start block-length commit-hash color)
-  "Render fringe for a specific block.
-Returns list of created overlays."
-  (let ((overlays nil)
-        (range (blame-reveal--get-visible-line-range))
-        (block-end (+ block-start block-length -1)))
-    (let ((render-start (max block-start (car range)))
-          (render-end (min block-end (cdr range))))
-      (when (<= render-start render-end)
-        (dotimes (i (- render-end render-start -1))
-          (let* ((line-num (+ render-start i))
-                 (fringe-ov (blame-reveal--create-fringe-overlay
-                             line-num color commit-hash)))
-            (when fringe-ov
-              (push fringe-ov overlays))))))
-    overlays))
+(defun blame-reveal--recolor-and-render ()
+  "Recalculate colors and re-render (for theme changes)."
+  (when blame-reveal--blame-data
+    (setq blame-reveal--color-map (make-hash-table :test 'equal))
+    (blame-reveal--render-visible-region)))
+
+
+;;;; Loading Functions
+
+(defsubst blame-reveal--get-visible-commits ()
+  "Get list of commit hashes in visible area."
+  (when blame-reveal--blame-data
+    (let* ((range (blame-reveal--get-visible-line-range))
+           (start-line (car range))
+           (end-line (cdr range))
+           (visible-blocks (blame-reveal--find-block-boundaries
+                            blame-reveal--blame-data
+                            start-line
+                            end-line)))
+      (mapcar #'cadr visible-blocks))))
+
+(defun blame-reveal--ensure-visible-commits-loaded ()
+  "Ensure commit info is loaded for all visible commits."
+  (when-let ((visible-commits (blame-reveal--get-visible-commits)))
+    (dolist (commit visible-commits)
+      (blame-reveal--ensure-commit-info commit))
+    (blame-reveal--update-recent-commits)))
+
+(defun blame-reveal--load-commits-incrementally ()
+  "Load commit info for visible area only (lazy loading)."
+  (blame-reveal--ensure-visible-commits-loaded))
+
+(defun blame-reveal--load-blame-data ()
+  "Load git blame data in background."
+  (unless blame-reveal--loading
+    (setq blame-reveal--loading t)
+    (message "Loading git blame data...")
+    (run-with-idle-timer
+     0.01 nil
+     (lambda (buffer)
+       (when (buffer-live-p buffer)
+         (with-current-buffer buffer
+           (let ((blame-data (blame-reveal--get-blame-data)))
+             (if blame-data
+                 (progn
+                   (setq blame-reveal--blame-data blame-data)
+                   (setq blame-reveal--commit-info (make-hash-table :test 'equal))
+                   (setq blame-reveal--color-map (make-hash-table :test 'equal))
+                   (setq blame-reveal--timestamps nil)
+                   (setq blame-reveal--recent-commits nil)
+                   (setq blame-reveal--loading nil)
+
+                   ;; Start incremental loading
+                   (blame-reveal--load-commits-incrementally)
+
+                   ;; Initial render with visible commits
+                   (blame-reveal--render-visible-region)
+
+                   (message "Git blame loaded: %d lines" (length blame-data)))
+               (setq blame-reveal--loading nil)
+               (message "No git blame data available"))))))
+     (current-buffer))))
+
+(defun blame-reveal--full-update ()
+  "Full update: reload blame data and render visible region."
+  (interactive)
+  (setq blame-reveal--blame-data nil
+        blame-reveal--commit-info nil
+        blame-reveal--color-map nil
+        blame-reveal--timestamps nil
+        blame-reveal--recent-commits nil)
+  (blame-reveal--load-blame-data))
+
+
+;;;; Event Handlers
 
 (defun blame-reveal--get-current-block ()
   "Get the commit hash and start line of block at current line."
@@ -966,12 +953,31 @@ Returns list of created overlays."
             (throw 'found (cons block-commit block-start)))))
       nil)))
 
-(defun blame-reveal--clear-temp-overlays ()
-  "Clear temporary overlays for old commits."
-  (dolist (overlay blame-reveal--temp-old-overlays)
-    (when (overlay-buffer overlay)
-      (delete-overlay overlay)))
-  (setq blame-reveal--temp-old-overlays nil))
+(defun blame-reveal--temp-overlay-renderer (buf hash col)
+  "Render temporary overlays for old commit HASH with color COL in buffer BUF."
+  (when (buffer-live-p buf)
+    (with-current-buffer buf
+      (when (equal blame-reveal--current-block-commit hash)
+        ;; Only find blocks in visible range
+        (let* ((range (blame-reveal--get-visible-line-range))
+               (start-line (car range))
+               (end-line (cdr range))
+               (visible-blocks
+                (blame-reveal--find-block-boundaries
+                 blame-reveal--blame-data
+                 start-line
+                 end-line)))
+          ;; Render temp overlays for matching blocks in visible area
+          (dolist (block visible-blocks)
+            (let ((blk-start (nth 0 block))
+                  (blk-commit (nth 1 block))
+                  (blk-length (nth 2 block)))
+              (when (equal blk-commit hash)
+                (let ((temp-ovs (blame-reveal--render-block-fringe
+                                 blk-start blk-length hash col)))
+                  (setq blame-reveal--temp-old-overlays
+                        (append temp-ovs
+                                blame-reveal--temp-old-overlays)))))))))))
 
 (defun blame-reveal--update-header ()
   "Update header display based on current cursor position."
@@ -1014,30 +1020,7 @@ Returns list of created overlays."
               (setq blame-reveal--temp-overlay-timer
                     (run-with-idle-timer
                      blame-reveal-temp-overlay-delay nil
-                     (lambda (buf hash col)
-                       (when (buffer-live-p buf)
-                         (with-current-buffer buf
-                           (when (equal blame-reveal--current-block-commit hash)
-                             ;; Only find blocks in visible range
-                             (let* ((range (blame-reveal--get-visible-line-range))
-                                    (start-line (car range))
-                                    (end-line (cdr range))
-                                    (visible-blocks
-                                     (blame-reveal--find-block-boundaries
-                                      blame-reveal--blame-data
-                                      start-line
-                                      end-line)))
-                               ;; Render temp overlays for matching blocks in visible area
-                               (dolist (block visible-blocks)
-                                 (let ((blk-start (nth 0 block))
-                                       (blk-commit (nth 1 block))
-                                       (blk-length (nth 2 block)))
-                                   (when (equal blk-commit hash)
-                                     (let ((temp-ovs (blame-reveal--render-block-fringe
-                                                      blk-start blk-length hash col)))
-                                       (setq blame-reveal--temp-old-overlays
-                                             (append temp-ovs
-                                                     blame-reveal--temp-old-overlays)))))))))))
+                     #'blame-reveal--temp-overlay-renderer
                      (current-buffer) commit-hash color))))
 
         ;; No current block or moved away
@@ -1051,54 +1034,13 @@ Returns list of created overlays."
           (blame-reveal--clear-temp-overlays)
           (setq blame-reveal--current-block-commit nil))))))
 
-(defun blame-reveal--load-blame-data ()
-  "Load git blame data in background."
-  (unless blame-reveal--loading
-    (setq blame-reveal--loading t)
-    (message "Loading git blame data...")
-    (run-with-idle-timer
-     0.01 nil
-     (lambda (buffer)
-       (when (buffer-live-p buffer)
-         (with-current-buffer buffer
-           (let ((blame-data (blame-reveal--get-blame-data)))
-             (if blame-data
-                 (progn
-                   (setq blame-reveal--blame-data blame-data)
-                   (setq blame-reveal--commit-info (make-hash-table :test 'equal))
-                   (setq blame-reveal--color-map (make-hash-table :test 'equal))
-                   (setq blame-reveal--timestamps nil)
-                   (setq blame-reveal--recent-commits nil)
-                   (setq blame-reveal--all-commits-loaded nil)
-                   (setq blame-reveal--loading nil)
-
-                   ;; Start incremental loading
-                   (blame-reveal--load-commits-incrementally)
-
-                   ;; Initial render with visible commits
-                   (blame-reveal--render-visible-region)
-
-                   (message "Git blame loaded: %d lines" (length blame-data)))
-               (setq blame-reveal--loading nil)
-               (message "No git blame data available"))))))
-     (current-buffer))))
-
-(defun blame-reveal--recolor-and-render ()
-  "Recalculate colors and re-render (for theme changes)."
-  (when blame-reveal--blame-data
-    (setq blame-reveal--color-map (make-hash-table :test 'equal))
-    (blame-reveal--render-visible-region)))
-
-(defun blame-reveal--full-update ()
-  "Full update: reload blame data and render visible region."
-  (interactive)
-  (setq blame-reveal--blame-data nil
-        blame-reveal--commit-info nil
-        blame-reveal--color-map nil
-        blame-reveal--timestamps nil
-        blame-reveal--recent-commits nil
-        blame-reveal--all-commits-loaded nil)
-  (blame-reveal--load-blame-data))
+(defun blame-reveal--scroll-handler-impl (buf)
+  "Implementation of scroll handler for buffer BUF."
+  (when (buffer-live-p buf)
+    (with-current-buffer buf
+      (when blame-reveal-mode
+        (blame-reveal--ensure-visible-commits-loaded)
+        (blame-reveal--render-visible-region)))))
 
 (defun blame-reveal--on-scroll ()
   "Handle scroll event with debouncing."
@@ -1108,17 +1050,98 @@ Returns list of created overlays."
       (when blame-reveal--scroll-timer
         (cancel-timer blame-reveal--scroll-timer))
       (setq blame-reveal--scroll-timer
-            (run-with-idle-timer 0.1 nil
-                                 (lambda (buf)
-                                   (when (buffer-live-p buf)
-                                     (with-current-buffer buf
-                                       (when blame-reveal-mode
-                                         (blame-reveal--render-visible-region)))))
-                                 (current-buffer))))))
+            (run-with-idle-timer
+             0.1 nil
+             #'blame-reveal--scroll-handler-impl
+             (current-buffer))))))
 
 (defun blame-reveal--scroll-handler (_win _start)
   "Handle window scroll events."
   (blame-reveal--on-scroll))
+
+(defun blame-reveal--on-theme-change (&rest _)
+  "Handle theme change event and refresh all blame displays."
+  (when blame-reveal--theme-change-timer
+    (cancel-timer blame-reveal--theme-change-timer))
+  (setq blame-reveal--theme-change-timer
+        (run-with-timer 0.3 nil
+                        (lambda ()
+                          (let ((current-buf (current-buffer))
+                                (current-point (point)))
+                            (dolist (buffer (buffer-list))
+                              (with-current-buffer buffer
+                                (when blame-reveal-mode
+                                  ;; Re-render fringe overlays with new theme colors
+                                  (blame-reveal--recolor-and-render))))
+
+                            ;; Refresh header in current buffer if it exists
+                            (when (buffer-live-p current-buf)
+                              (with-current-buffer current-buf
+                                (when (and blame-reveal-mode
+                                           blame-reveal--current-block-commit)
+                                  (save-excursion
+                                    (goto-char current-point)
+                                    ;; Force header refresh by clearing and re-triggering
+                                    (let ((old-commit blame-reveal--current-block-commit))
+                                      (setq blame-reveal--current-block-commit nil)
+                                      ;; Clear existing header
+                                      (when blame-reveal--header-overlay
+                                        (delete-overlay blame-reveal--header-overlay)
+                                        (setq blame-reveal--header-overlay nil))
+                                      ;; Clear temp overlays
+                                      (blame-reveal--clear-temp-overlays)
+                                      ;; Re-trigger header update
+                                      (blame-reveal--update-header)))))))))))
+
+(defun blame-reveal--setup-theme-advice ()
+  "Setup advice to monitor theme changes."
+  (if (boundp 'after-enable-theme-hook)
+      ;; Use official hook for Emacs 29+
+      (add-hook 'after-enable-theme-hook #'blame-reveal--on-theme-change)
+    ;; Use advice for older Emacs versions
+    (advice-add 'load-theme :after #'blame-reveal--on-theme-change)
+    (advice-add 'enable-theme :after #'blame-reveal--on-theme-change)
+    (advice-add 'disable-theme :after #'blame-reveal--on-theme-change)))
+
+(defun blame-reveal--remove-theme-advice ()
+  "Remove theme change advice."
+  (when blame-reveal--theme-change-timer
+    (cancel-timer blame-reveal--theme-change-timer)
+    (setq blame-reveal--theme-change-timer nil))
+
+  (if (boundp 'after-enable-theme-hook)
+      (remove-hook 'after-enable-theme-hook #'blame-reveal--on-theme-change)
+    (advice-remove 'load-theme #'blame-reveal--on-theme-change)
+    (advice-remove 'enable-theme #'blame-reveal--on-theme-change)
+    (advice-remove 'disable-theme #'blame-reveal--on-theme-change)))
+
+
+;;;; Magit Integration
+
+(defun blame-reveal--should-use-magit-p ()
+  "Check if magit should be used based on configuration."
+  (pcase blame-reveal-use-magit
+    ('auto (and (fboundp 'magit-show-commit)
+                (fboundp 'magit-log-buffer-file)))
+    ('t (if (and (fboundp 'magit-show-commit)
+                 (fboundp 'magit-log-buffer-file))
+            t
+          (error "Magit is not available but blame-reveal-use-magit is set to t")))
+    (_ nil)))
+
+
+;;;; Interactive Commands
+
+;;;###autoload
+(defun blame-reveal-copy-commit-hash ()
+  "Copy the commit hash of the current line to kill ring."
+  (interactive)
+  (if-let* ((current-block (blame-reveal--get-current-block))
+            (commit (car current-block)))
+      (progn
+        (kill-new commit)
+        (message "Copied commit hash: %s" (substring commit 0 8)))
+    (message "No git blame info at current line")))
 
 ;;;###autoload
 (defun blame-reveal-show-commit-diff ()
@@ -1151,38 +1174,35 @@ Uses magit if `blame-reveal-use-magit' is configured to do so."
     (message "No commit info at current line")))
 
 ;;;###autoload
-(defun blame-reveal-show-line-history ()
-  "Show the git log history of current line.
-This function always uses built-in git."
+(defun blame-reveal-show-commit-details ()
+  "Show full commit details including description in a separate buffer."
   (interactive)
-  (if-let ((file (buffer-file-name)))
-      (if (vc-git-registered file)
-          (let* ((line-num (line-number-at-pos))
-                 (buffer-name (format "*Git Log: %s:%d*"
-                                      (file-name-nondirectory file)
-                                      line-num)))
-            (with-current-buffer (get-buffer-create buffer-name)
-              (let ((inhibit-read-only t))
-                (erase-buffer)
-                (call-process "git" nil t nil "log"
-                              "--color=always"
-                              "-L" (format "%d,%d:%s" line-num line-num file))
-                (goto-char (point-min))
-                (require 'ansi-color)
-                (ansi-color-apply-on-region (point-min) (point-max))
-                (special-mode)
-                (setq-local revert-buffer-function
-                            (lambda (&rest _)
-                              (let ((inhibit-read-only t))
-                                (erase-buffer)
-                                (call-process "git" nil t nil "log"
-                                              "--color=always"
-                                              "-L" (format "%d,%d:%s" line-num line-num file))
-                                (goto-char (point-min))
-                                (ansi-color-apply-on-region (point-min) (point-max))))))
-              (pop-to-buffer (current-buffer))))
-        (message "File is not tracked by git"))
-    (message "No file associated with current buffer")))
+  (if-let* ((current-block (blame-reveal--get-current-block))
+            (commit-hash (car current-block))
+            (info (gethash commit-hash blame-reveal--commit-info)))
+      (let* ((short-hash (nth 0 info))
+             (author (nth 1 info))
+             (date (nth 2 info))
+             (summary (nth 3 info))
+             (description (nth 5 info))
+             (desc-trimmed (if description (string-trim description) ""))
+             (buffer (get-buffer-create "*Commit Details*")))
+        (with-current-buffer buffer
+          (setq buffer-read-only nil)
+          (erase-buffer)
+          (insert (format "▸ %s\n" summary))
+          (insert (format "  %s · %s · %s\n" short-hash author date))
+          (if (and desc-trimmed (not (string-empty-p desc-trimmed)))
+              (progn
+                (insert "\n")
+                (let ((desc-lines (split-string desc-trimmed "\n")))
+                  (dolist (line desc-lines)
+                    (insert (format "  %s\n" line)))))
+            (insert "\n  (no description)\n"))
+          (goto-char (point-min))
+          (special-mode))
+        (pop-to-buffer buffer))
+    (message "No commit info at current line")))
 
 ;;;###autoload
 (defun blame-reveal-show-file-history ()
@@ -1222,46 +1242,41 @@ Uses magit if `blame-reveal-use-magit' is configured to do so."
     (message "No file associated with current buffer")))
 
 ;;;###autoload
-(defun blame-reveal-show-commit-details ()
-  "Show full commit details including description in a separate buffer."
+(defun blame-reveal-show-line-history ()
+  "Show the git log history of current line.
+This function always uses built-in git."
   (interactive)
-  (if-let* ((current-block (blame-reveal--get-current-block))
-            (commit-hash (car current-block))
-            (info (gethash commit-hash blame-reveal--commit-info)))
-      (let* ((short-hash (nth 0 info))
-             (author (nth 1 info))
-             (date (nth 2 info))
-             (summary (nth 3 info))
-             (description (nth 5 info))
-             (desc-trimmed (if description (string-trim description) ""))
-             (buffer (get-buffer-create "*Commit Details*")))
-        (with-current-buffer buffer
-          (setq buffer-read-only nil)
-          (erase-buffer)
-          (insert (format "▸ %s\n" summary))
-          (insert (format "  %s · %s · %s\n" short-hash author date))
-          (if (and desc-trimmed (not (string-empty-p desc-trimmed)))
-              (progn
-                (insert "\n")
-                (let ((desc-lines (split-string desc-trimmed "\n")))
-                  (dolist (line desc-lines)
-                    (insert (format "  %s\n" line)))))
-            (insert "\n  (no description)\n"))
-          (goto-char (point-min))
-          (special-mode))
-        (pop-to-buffer buffer))
-    (message "No commit info at current line")))
+  (if-let ((file (buffer-file-name)))
+      (if (vc-git-registered file)
+          (let* ((line-num (line-number-at-pos))
+                 (buffer-name (format "*Git Log: %s:%d*"
+                                      (file-name-nondirectory file)
+                                      line-num)))
+            (with-current-buffer (get-buffer-create buffer-name)
+              (let ((inhibit-read-only t))
+                (erase-buffer)
+                (call-process "git" nil t nil "log"
+                              "--color=always"
+                              "-L" (format "%d,%d:%s" line-num line-num file))
+                (goto-char (point-min))
+                (require 'ansi-color)
+                (ansi-color-apply-on-region (point-min) (point-max))
+                (special-mode)
+                (setq-local revert-buffer-function
+                            (lambda (&rest _)
+                              (let ((inhibit-read-only t))
+                                (erase-buffer)
+                                (call-process "git" nil t nil "log"
+                                              "--color=always"
+                                              "-L" (format "%d,%d:%s" line-num line-num file))
+                                (goto-char (point-min))
+                                (ansi-color-apply-on-region (point-min) (point-max))))))
+              (pop-to-buffer (current-buffer))))
+        (message "File is not tracked by git"))
+    (message "No file associated with current buffer")))
 
-;;;###autoload
-(defun blame-reveal-copy-commit-hash ()
-  "Copy the commit hash of the current line to kill ring."
-  (interactive)
-  (if-let* ((current-block (blame-reveal--get-current-block))
-            (commit (car current-block)))
-      (progn
-        (kill-new commit)
-        (message "Copied commit hash: %s" (substring commit 0 8)))
-    (message "No git blame info at current line")))
+
+;;;; Minor Mode Definition
 
 ;;;###autoload
 (define-minor-mode blame-reveal-mode
