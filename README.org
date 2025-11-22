@@ -4,8 +4,10 @@ A contextual, high-performance Git blame UI for Emacs.
 
 ** Philosophy
 
-> Blame is context, not decoration.
-  blame-reveal displays only what matters — visible lines and recent commits — keeping Emacs responsive even on very large files.
+#+BEGIN_QUOTE
+Blame is context, not decoration.
+blame-reveal displays only what matters — visible lines and recent commits — keeping Emacs responsive even on very large files.
+#+END_QUOTE
 
 Unlike traditional blame tools that process entire files upfront, =blame-reveal= renders only the visible viewport plus a margin. This ensures instant activation, smooth scrolling, and minimal resource usage.
 
