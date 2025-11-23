@@ -1300,6 +1300,7 @@ This function always uses built-in git."
             (add-hook 'after-save-hook #'blame-reveal--full-update nil t)
             (add-hook 'window-scroll-functions #'blame-reveal--scroll-handler nil t)
             (add-hook 'post-command-hook #'blame-reveal--update-header nil t)
+            (add-hook 'window-configuration-change-hook #'blame-reveal--render-visible-region nil t)
             (blame-reveal--setup-theme-advice))))
 
     (setq emulation-mode-map-alists
@@ -1314,6 +1315,7 @@ This function always uses built-in git."
     (remove-hook 'after-save-hook #'blame-reveal--full-update t)
     (remove-hook 'window-scroll-functions #'blame-reveal--scroll-handler t)
     (remove-hook 'post-command-hook #'blame-reveal--update-header t)
+    (remove-hook 'window-configuration-change-hook #'blame-reveal--render-visible-region t)
     (when blame-reveal--scroll-timer
       (cancel-timer blame-reveal--scroll-timer)
       (setq blame-reveal--scroll-timer nil))
