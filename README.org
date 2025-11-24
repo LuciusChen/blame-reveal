@@ -19,6 +19,9 @@ Unlike traditional blame tools that process entire files upfront, =blame-reveal=
 
 [[file:assets/Snipaste_2025-11-23_11-20-36.jpg]]
 
+[[file:assets/Snipaste_2025-11-24_13-49-54.jpg]]
+
+
 ** Features
 
 *** Visual Indicators
