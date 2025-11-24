@@ -11,16 +11,12 @@ blame-reveal displays only what matters — visible lines and recent commits —
 
 Unlike traditional blame tools that process entire files upfront, =blame-reveal= renders only the visible viewport plus a margin. This ensures instant activation, smooth scrolling, and minimal resource usage.
 
-[[file:assets/Snipaste_2025-11-23_11-18-47.jpg]]
 
-[[file:assets/Snipaste_2025-11-23_11-18-58.jpg]]
+[[file:assets/recent-commits.jpg]]
 
-[[file:assets/Snipaste_2025-11-23_11-19-18.jpg]]
+[[file:assets/relatively-old-commits.jpg]]
 
-[[file:assets/Snipaste_2025-11-23_11-20-36.jpg]]
-
-[[file:assets/Snipaste_2025-11-24_13-49-54.jpg]]
-
+[[file:assets/uncommit.jpg]]
 
 ** Features
 
