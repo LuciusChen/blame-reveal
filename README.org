@@ -16,6 +16,8 @@ Unlike traditional blame tools that process entire files upfront, =blame-reveal=
 
 [[file:assets/relatively-old-commits.jpg]]
 
+The green margin here is the effect of the [[https://github.com/dgutov/diff-hl][diff-hl]] package, used in combination as follows.
+
 [[file:assets/uncommit.jpg]]
 
 ** Features
