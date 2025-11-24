@@ -4,13 +4,10 @@ A contextual, high-performance Git blame UI for Emacs.
 
 ** Philosophy
 
-#+BEGIN_QUOTE
-Blame is context, not decoration.
-blame-reveal displays only what matters — visible lines and recent commits — keeping Emacs responsive even on very large files.
-#+END_QUOTE
+> Blame is context, not decoration.
+> blame-reveal displays only what matters — visible lines and recent commits — keeping Emacs responsive even on very large files.
 
 Unlike traditional blame tools that process entire files upfront, =blame-reveal= renders only the visible viewport plus a margin. This ensures instant activation, smooth scrolling, and minimal resource usage.
-
 
 [[file:assets/recent-commits.jpg]]
 
@@ -27,12 +24,12 @@ The green margin here is the effect of the [[https://github.com/dgutov/diff-hl][
 - *Color-coded fringe blocks* (IDEA-style)
   - *Recent commits* (top N, within time limit): Gradient colors, always visible
     - Color intensity by rank (newest = brightest)
-  - *Old commits* (not in top N or beyond time limit): Gray, visible only when cursor is on them
+  - *Old commits* (not in top N or beyond time limit): Derived color from scheme, visible only when cursor is on them
     - Smart highlighting: All visible lines from same commit temporarily highlighted
   - Automatic theme adaptation (dark/light)
 
 - *Inline commit headers* above each block
-  - Three formats: =line= (message), =normal= (+ metadata), =full= (+ description)
+  - Three formats: =line= (message), =compact= (+ metadata), =full= (+ description)
   - Styles: background, box, or inverse video
   - Customizable typography (weight, height)
 
@@ -45,26 +42,26 @@ Active Project Example:
 ═══════════════════════════════════════════════════════════════
 Today ←──────────── 90 days ───────→ 2 years ago
 
-C1  (3d ago)   ✓ Top 20  ✓ <90d  → Colorized
-C2  (5d ago)   ✓ Top 20  ✓ <90d  → Colorized
+C1  (3d ago)   ✓ Top 20  ✓ <90d  → Colorized (gradient)
+C2  (5d ago)   ✓ Top 20  ✓ <90d  → Colorized (gradient)
 ...
-C20 (85d ago)  ✓ Top 20  ✓ <90d  → Colorized
-C21 (95d ago)  ✗ >90d             → Gray
-C50 (2y ago)   ✗ Not top 20       → Gray
+C20 (85d ago)  ✓ Top 20  ✓ <90d  → Colorized (gradient)
+C21 (95d ago)  ✗ >90d              → Derived color (dimmed)
+C50 (2y ago)   ✗ Not top 20        → Derived color (dimmed)
 
-Result: 20 commits colorized
+Result: 20 commits colorized with gradient
 #+end_src
 
 #+begin_src
 Inactive Project Example:
 ═══════════════════════════════════════════════════════════════
-C1  (3d ago)    ✓ Top 20  ✓ <90d  → Colorized
-C2  (5d ago)    ✓ Top 20  ✓ <90d  → Colorized
-C3  (100d ago)  ✓ Top 20  ✗ >90d  → Gray
+C1  (3d ago)    ✓ Top 20  ✓ <90d  → Colorized (gradient)
+C2  (5d ago)    ✓ Top 20  ✓ <90d  → Colorized (gradient)
+C3  (100d ago)  ✓ Top 20  ✗  >90d  → Derived color (dimmed)
 ...
-C20 (2y ago)    ✓ Top 20  ✗ >90d  → Gray
+C20 (2y ago)    ✓ Top 20  ✗  >90d  → Derived color (dimmed)
 
-Result: 2 commits colorized
+Result: 2 commits colorized with gradient
 #+end_src
 
 *Auto-Expand Mode* (default: =t=)
@@ -74,7 +71,7 @@ With auto-expand:    All commits <90d colorized (ignores count)
 Without auto-expand: Max 20 commits AND <90d
 #+end_src
 
-In short: recent commits get color; older history stays unobtrusive until inspected.
+In short: recent commits get gradient colors; older history uses derived colors and stays unobtrusive until inspected.
 
 *** Color Gradient
 
@@ -84,11 +81,11 @@ Colors assigned by *relative rank* among recent commits:
 Rank 1  (newest)  ████████  Brightest  #5A9FD4
 Rank 10           ████░░░░  Medium     #4F8FBF
 Rank 20 (oldest)  █░░░░░░░  Darkest    #4A7BA7
-Rank 21+          ░░░░░░░░  Gray       #4A4A4A
+Rank 21+          ▓▓▓▓▓▓▓▓  Derived    #3A5A7A (darker/lighter than oldest)
 
 - HSL gradient with ease-out curve
-- Dark theme: newer = brighter
-- Light theme: newer = darker
+- Dark theme: newer = brighter, old = darker
+- Light theme: newer = darker, old = lighter
 #+end_src
 
 *** Performance Optimizations
@@ -106,14 +103,14 @@ Rank 21+          ░░░░░░░░  Gray       #4A4A4A
 
 *** Interactive Commands
 
-| Key | Command                          | Action       |
-|-----+----------------------------------+--------------|
-| =q=   | =blame-reveal-mode=                | Toggle       |
-| =c=   | =blame-reveal-copy-commit-hash=    | Copy hash    |
-| =d=   | =blame-reveal-show-commit-diff=    | Show diff    |
-| =s=   | =blame-reveal-show-commit-details= | Full message |
-| =h=   | =blame-reveal-show-file-history=   | File log     |
-| =l=   | =blame-reveal-show-line-history=   | Line log     |
+| Key | Command                            | Action       |
+|-----+------------------------------------+--------------|
+| =q= | =blame-reveal-mode=                | Toggle       |
+| =c= | =blame-reveal-copy-commit-hash=    | Copy hash    |
+| =d= | =blame-reveal-show-commit-diff=    | Show diff    |
+| =s= | =blame-reveal-show-commit-details= | Full message |
+| =h= | =blame-reveal-show-file-history=   | File log     |
+| =l= | =blame-reveal-show-line-history=   | Line log     |
 
 ** Installation
 
@@ -167,15 +164,16 @@ M-x blame-reveal-mode
 
 *** Color Scheme
 
-The gradient color scheme for recent commits uses HSL (Hue, Saturation, Lightness) parameters:
+The gradient color scheme for recent commits uses HSL (Hue, Saturation, Lightness) parameters.
+Old commits automatically get a derived color that's darker (dark theme) or lighter (light theme) than the oldest recent commit:
 
 #+begin_src elisp
 (setq blame-reveal-color-scheme
       '(:hue 210                    ; Blue (0-360: 0=red, 120=green, 210=blue, 280=purple)
         :dark-newest 0.70           ; Lightness for newest (dark theme, higher=brighter)
-        :dark-oldest 0.35           ; Lightness for oldest (dark theme, lower=dimmer)
+        :dark-oldest 0.35           ; Lightness for oldest recent (dark theme)
         :light-newest 0.45          ; Lightness for newest (light theme, lower=darker)
-        :light-oldest 0.75          ; Lightness for oldest (light theme, higher=lighter)
+        :light-oldest 0.75          ; Lightness for oldest recent (light theme)
         :saturation-min 0.25        ; Minimum saturation (oldest commits)
         :saturation-max 0.60))      ; Maximum saturation (newest commits)
 #+end_src
@@ -216,6 +214,7 @@ The gradient color scheme for recent commits uses HSL (Hue, Saturation, Lightnes
 - Gradient applied to recent commits (top N within time limit)
 - Newest commit gets highest saturation + theme-appropriate lightness
 - Oldest recent commit gets lowest saturation + theme-appropriate lightness
+- Old commits get derived color (30% darker/50% lighter than oldest recent)
 - Ease-out curve makes newest commits stand out more
 
 *** Commit Selection
@@ -265,11 +264,11 @@ The gradient color scheme for recent commits uses HSL (Hue, Saturation, Lightnes
       blame-reveal-uncommitted-color nil)  ; Auto theme-based color
 #+end_src
 
-/Tip:/ When using with [[https://github.com/dgutov/diff-hl][diff-hl]], enabling ~diff-hl-margin-mode~ is recommended for a better experience. (Without it, both indicators will be in the fringe, which still works fine.)
+/Tip:/ When using with [[https://github.com/dgutov/diff-hl][diff-hl]], enabling =diff-hl-margin-mode= is recommended for a better experience. (Without it, both indicators will be in the fringe, which still works fine.)
 
 *** Color Overrides
 
-Override automatic gradient with fixed colors:
+Override automatic gradient and derived colors with fixed colors:
 
 #+begin_src elisp
 ;; Recent commits (default: auto gradient)
@@ -281,9 +280,9 @@ Override automatic gradient with fixed colors:
 ;;            "#ff6b6b"  ; Red for commits < 1 day
 ;;          "#6699cc"))) ; Blue for older
 
-;; Old commits (default: theme-based gray)
-(setq blame-reveal-old-commit-color nil)            ; Auto: dark=#4a4a4a, light=#d0d0d0
-;;    blame-reveal-old-commit-color "#888888")      ; Fixed gray
+;; Old commits (default: derived from color scheme)
+(setq blame-reveal-old-commit-color nil)            ; Auto: derived from scheme
+;;    blame-reveal-old-commit-color "#888888")      ; Fixed color
 #+end_src
 
 /Note:/ =blame-reveal-color-scheme= is ignored when =blame-reveal-recent-commit-color= is set to a fixed color or function.
@@ -312,8 +311,8 @@ Loading:
 Rendering:
 1. Calculate visible range (viewport + margin)
 2. Find blocks in range
-3. Render recent commits (permanent fringe)
-4. On cursor move to old commit → render gray (temporary)
+3. Render recent commits (permanent fringe with gradient)
+4. On cursor move to old commit → render derived color (temporary)
 5. On scroll → re-render (debounced)
 #+end_src
 
