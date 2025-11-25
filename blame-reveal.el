@@ -176,12 +176,18 @@ See all options: M-x customize-group RET blame-reveal"
 
 (defcustom blame-reveal-display-layout 'compact
   "Format for commit message header.
-- `line': show only the commit header
-- `compact': show header + metadata
-- `full': show header + metadata + description"
-  :type '(choice (const full)
-                 (const compact)
-                 (const line))
+- `none': no header (only fringe indicators, use 's' to view details)
+- `line': show only the commit message line
+- `compact': show message + metadata (hash, author, date)
+- `full': show message + metadata + description
+
+When set to `none', no header overlay is created when cursor moves
+between blocks, providing a cleaner visual experience. You can still
+view commit details using `blame-reveal-show-commit-details' (s key)."
+  :type '(choice (const :tag "No header (fringe only)" none)
+                 (const :tag "Message line only" line)
+                 (const :tag "Message + metadata" compact)
+                 (const :tag "Message + metadata + description" full))
   :group 'blame-reveal)
 
 (defcustom blame-reveal-display-style 'background
@@ -1443,10 +1449,6 @@ Use lazy loading for large files, full loading for small files."
                  (is-uncommitted (blame-reveal--is-uncommitted-p commit-hash))
                  (is-old-commit (and (not is-uncommitted)
                                      (not (blame-reveal--should-render-commit commit-hash))))
-                 ;; Color selection:
-                 ;; 1. Uncommitted: use special uncommitted color
-                 ;; 2. Old commits: use derived color from scheme
-                 ;; 3. Recent commits: use calculated color
                  (color (cond
                          (is-uncommitted
                           (blame-reveal--get-uncommitted-color))
@@ -1454,7 +1456,6 @@ Use lazy loading for large files, full loading for small files."
                           (blame-reveal--get-old-commit-color))
                          (t
                           (blame-reveal--get-commit-color commit-hash))))
-                 ;; Determine if we should hide header fringe for uncommitted changes
                  (hide-header-fringe (and is-uncommitted
                                           (not blame-reveal-show-uncommitted-fringe))))
 
@@ -1471,15 +1472,16 @@ Use lazy loading for large files, full loading for small files."
             ;; Clear previous temp overlays immediately
             (blame-reveal--clear-temp-overlays)
 
-            ;; Create new header immediately
+            ;; Update current block commit
             (setq blame-reveal--current-block-commit commit-hash)
-            (setq blame-reveal--header-overlay
-                  (blame-reveal--create-header-overlay
-                   block-start commit-hash color hide-header-fringe))
 
-            ;; Show temp fringe overlay for:
-            ;; 1. Old commits (not in recent list)
-            ;; 2. Uncommitted changes (only if blame-reveal-show-uncommitted-fringe is t)
+            ;; Create new header only if layout is not 'none
+            (unless (eq blame-reveal-display-layout 'none)
+              (setq blame-reveal--header-overlay
+                    (blame-reveal--create-header-overlay
+                     block-start commit-hash color hide-header-fringe)))
+
+            ;; Show temp fringe overlay for old commits or uncommitted changes
             (when (or is-old-commit
                       (and is-uncommitted blame-reveal-show-uncommitted-fringe))
               (setq blame-reveal--temp-overlay-timer
@@ -1498,7 +1500,10 @@ Use lazy loading for large files, full loading for small files."
             (setq blame-reveal--header-overlay nil))
           (blame-reveal--clear-temp-overlays)
           (setq blame-reveal--current-block-commit nil)))
-      (blame-reveal--update-sticky-header))))
+
+      ;; Only update sticky header if layout is not 'none
+      (unless (eq blame-reveal-display-layout 'none)
+        (blame-reveal--update-sticky-header)))))
 
 (defun blame-reveal--scroll-handler-impl (buf)
   "Implementation of scroll handler for buffer BUF."
