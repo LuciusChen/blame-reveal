@@ -33,6 +33,62 @@ The green margin here is the effect of the [[https://github.com/dgutov/diff-hl][
   - Formats: =line= / =compact= / =full=
   - Styles: =background= / =box= / =inverse=
   - Customizable typography
+*** Sticky Header
+
+When working in large commit blocks where the header scrolls off-screen, =blame-reveal= automatically displays a "sticky" header at the window top for easy reference.
+
+[[file:assets/sticky-header.jpg]]
+
+*Behavior*:
+- Appears when cursor is in a block larger than the window height
+- Header scrolled off-screen → Sticky version shows at top
+- Visual indicator (󰐃) distinguishes it from regular headers
+- Automatically adapts to window size (split screens, full screen)
+
+*Configuration*:
+
+#+begin_src elisp
+;; Minimum block size to show sticky header
+(setq blame-reveal-sticky-header-min-block-size 'window-height)  ; Default (recommended)
+
+;; Fixed threshold (e.g., blocks with 30+ lines)
+(setq blame-reveal-sticky-header-min-block-size 30)
+
+;; Custom function (e.g., half of window height)
+(setq blame-reveal-sticky-header-min-block-size
+      (lambda () (/ (window-body-height) 2)))
+
+;; Examples for different workflows:
+
+;; Always show for medium-sized blocks
+(setq blame-reveal-sticky-header-min-block-size 20)
+
+;; Only for very large blocks (2x window height)
+(setq blame-reveal-sticky-header-min-block-size
+      (lambda () (* 2 (window-body-height))))
+
+;; 80% of window height
+(setq blame-reveal-sticky-header-min-block-size
+      (lambda () (floor (* 0.8 (window-body-height)))))
+#+end_src
+
+*How it adapts*:
+
+| Scenario                | Window Height | Block Size | Sticky Header? |
+|-------------------------+---------------+------------+----------------|
+| Full screen             | 60 lines      | 70 lines   | ✓ Yes          |
+| Full screen             | 60 lines      | 50 lines   | ✗ No           |
+| Vertical split          | 30 lines      | 35 lines   | ✓ Yes          |
+| Vertical split          | 30 lines      | 25 lines   | ✗ No           |
+| Horizontal split (tiny) | 15 lines      | 20 lines   | ✓ Yes          |
+
+*Use cases*:
+- Large refactoring commits spanning hundreds of lines
+- Browsing through function implementations
+- Reviewing long feature additions
+- Working with split windows on smaller screens
+
+*Tip*: The sticky header respects all your display settings (=display-layout=, =display-style=, typography) and shows the same fringe color as the commit block.
 
 *** Commit Selection & Colors
 

@@ -93,6 +93,9 @@
 (defvar-local blame-reveal--temp-old-overlays nil
   "Temporary overlays for old commit blocks when cursor is on them.")
 
+(defvar-local blame-reveal--sticky-header-overlay nil
+  "Overlay for sticky header at window top.")
+
 
 ;;;; Data Cache Variables
 
@@ -189,6 +192,24 @@ See all options: M-x customize-group RET blame-reveal"
   :type '(choice (const background)
                  (const box)
                  (const inverse))
+  :group 'blame-reveal)
+
+(defcustom blame-reveal-sticky-header-min-block-size 'window-height
+  "Minimum block size (lines) to show sticky header.
+Only show sticky header when the commit block is larger than this.
+
+Can be:
+- 'window-height: Use current window height (recommended, default)
+- A number: Fixed number of lines (e.g., 20)
+- A function: Called with no args, should return a number
+
+Examples:
+  'window-height           ; Blocks larger than window
+  30                       ; Blocks with 30+ lines
+  (lambda () (* 2 (window-body-height)))  ; Twice window height"
+  :type '(choice (const :tag "Window height (auto)" window-height)
+                 (integer :tag "Fixed number of lines")
+                 (function :tag "Custom function"))
   :group 'blame-reveal)
 
 
@@ -821,6 +842,131 @@ For recursive blame: respects `blame-reveal-recursive-ignore-time-limit'"
               (mapcar #'car recent-commits))))))
 
 
+;;;; Sticky Header Support
+
+(defun blame-reveal--clear-sticky-header ()
+  "Clear sticky header overlay."
+  (when blame-reveal--sticky-header-overlay
+    (delete-overlay blame-reveal--sticky-header-overlay)
+    (setq blame-reveal--sticky-header-overlay nil)))
+
+(defun blame-reveal--get-sticky-header-threshold ()
+  "Get the minimum block size for showing sticky header."
+  (pcase blame-reveal-sticky-header-min-block-size
+    ('window-height (window-body-height))
+    ((pred functionp) (funcall blame-reveal-sticky-header-min-block-size))
+    ((pred numberp) blame-reveal-sticky-header-min-block-size)
+    (_ (window-body-height))))  ; fallback
+
+(defun blame-reveal--update-sticky-header ()
+  "Update sticky header if needed."
+  (blame-reveal--clear-sticky-header)
+
+  (when-let* ((current-block (blame-reveal--get-current-block))
+              (commit-hash (car current-block))
+              (block-start-line (cdr current-block)))
+
+    ;; Find the full block to check size
+    (let ((block-info nil))
+      (dolist (block (blame-reveal--find-block-boundaries blame-reveal--blame-data))
+        (when (and (= (nth 0 block) block-start-line)
+                   (equal (nth 1 block) commit-hash))
+          (setq block-info block)))
+
+      (when block-info
+        (let* ((block-length (nth 2 block-info))
+               (threshold (blame-reveal--get-sticky-header-threshold))
+               (window-start-line (line-number-at-pos (window-start)))
+               (current-line (line-number-at-pos))
+               ;; Header is off screen if block starts before window
+               (header-off-screen (< block-start-line window-start-line))
+               ;; We're still in the same block
+               (in-block (and (>= current-line block-start-line)
+                              (< current-line (+ block-start-line block-length)))))
+
+          ;; Show sticky header if:
+          ;; 1. Block is large enough
+          ;; 2. Header is scrolled off screen
+          ;; 3. We're still in that block
+          (when (and (>= block-length threshold)
+                     header-off-screen
+                     in-block)
+            (save-excursion
+              (goto-char (window-start))
+              (let* ((pos (line-beginning-position))
+                     (is-uncommitted (blame-reveal--is-uncommitted-p commit-hash))
+                     (color (blame-reveal--get-commit-color commit-hash))
+                     (header-text (blame-reveal--format-header-text commit-hash))
+                     (overlay (make-overlay pos pos))
+                     (fringe-face (blame-reveal--ensure-fringe-face color))
+                     (hide-fringe (and is-uncommitted
+                                       (not blame-reveal-show-uncommitted-fringe))))
+
+                ;; Use same styling as regular header
+                (let* ((header-weight blame-reveal-header-weight)
+                       (header-height blame-reveal-header-height)
+                       (metadata-weight blame-reveal-metadata-weight)
+                       (metadata-height blame-reveal-metadata-height)
+                       (description-weight blame-reveal-description-weight)
+                       (description-height blame-reveal-description-height)
+
+                       (header-face (pcase blame-reveal-display-style
+                                      ('background (list :foreground color :weight header-weight
+                                                         :height header-height :background (face-background 'default)))
+                                      ('box (list :foreground color :weight header-weight :height header-height
+                                                  :box (list :line-width 1 :color color)
+                                                  :background (face-background 'default)))
+                                      ('inverse (list :background color :weight header-weight :height header-height))
+                                      (_ (list :foreground color :weight header-weight :height header-height
+                                               :background (face-background 'default)))))
+
+                       (metadata-face (pcase blame-reveal-display-style
+                                        ('background (list :foreground color :weight metadata-weight
+                                                           :height metadata-height :background (face-background 'default)))
+                                        ('box (list :foreground color :weight metadata-weight :height metadata-height
+                                                    :box (list :line-width 1 :color color)
+                                                    :background (face-background 'default)))
+                                        ('inverse (list :background color :weight metadata-weight :height metadata-height))
+                                        (_ (list :foreground color :weight metadata-weight :height metadata-height
+                                                 :background (face-background 'default)))))
+
+                       (header-lines (split-string header-text "\n"))
+                       ;; Add visual indicator that this is sticky
+                       (sticky-indicator (propertize "󰐃 " 'face `(:foreground ,color))))
+
+                  (overlay-put overlay 'blame-reveal-sticky t)
+                  (overlay-put overlay 'before-string
+                               (concat
+                                ;; First line with fringe
+                                (unless hide-fringe
+                                  (propertize "!" 'display
+                                              (list blame-reveal-style
+                                                    'blame-reveal-full
+                                                    fringe-face)))
+                                sticky-indicator
+                                (propertize (car header-lines) 'face header-face)
+                                "\n"
+                                ;; Second line with fringe (if exists)
+                                (when (cdr header-lines)
+                                  (concat
+                                   (unless hide-fringe
+                                     (propertize "!" 'display
+                                                 (list blame-reveal-style
+                                                       'blame-reveal-full
+                                                       fringe-face)))
+                                   sticky-indicator
+                                   (propertize (cadr header-lines) 'face metadata-face)
+                                   "\n"))
+                                ;; Final fringe line
+                                (unless hide-fringe
+                                  (propertize "!" 'display
+                                              (list blame-reveal-style
+                                                    'blame-reveal-full
+                                                    fringe-face)))))
+
+                  (setq blame-reveal--sticky-header-overlay overlay))))))))))
+
+
 ;;;; Overlay Management Functions
 
 (defun blame-reveal--find-block-boundaries (blame-data &optional start-line end-line)
@@ -1034,6 +1180,7 @@ If NO-FRINGE is non-nil, don't show fringe indicators."
   (when blame-reveal--header-overlay
     (delete-overlay blame-reveal--header-overlay)
     (setq blame-reveal--header-overlay nil))
+  (blame-reveal--clear-sticky-header)
   (setq blame-reveal--current-block-commit nil))
 
 (defun blame-reveal--clear-temp-overlays ()
@@ -1330,7 +1477,8 @@ Use lazy loading for large files, full loading for small files."
             (delete-overlay blame-reveal--header-overlay)
             (setq blame-reveal--header-overlay nil))
           (blame-reveal--clear-temp-overlays)
-          (setq blame-reveal--current-block-commit nil))))))
+          (setq blame-reveal--current-block-commit nil)))
+      (blame-reveal--update-sticky-header))))
 
 (defun blame-reveal--scroll-handler-impl (buf)
   "Implementation of scroll handler for buffer BUF."
@@ -1348,7 +1496,8 @@ Use lazy loading for large files, full loading for small files."
         (blame-reveal--ensure-visible-commits-loaded)
 
         ;; Render visible region
-        (blame-reveal--render-visible-region)))))
+        (blame-reveal--render-visible-region)
+        (blame-reveal--update-sticky-header)))))
 
 (defun blame-reveal--on-scroll ()
   "Handle scroll event with debouncing."
