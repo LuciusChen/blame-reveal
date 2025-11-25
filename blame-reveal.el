@@ -863,30 +863,6 @@ while ensuring the limit adapts as more commits are loaded."
       (or (> count-diff 10)           ; More than 10 new commits
           (> count-ratio 0.2)))))     ; More than 20% change
 
-;; (defun blame-reveal--get-reference-time ()
-;;   "Get reference time for age calculation.
-
-;; In normal blame mode: returns current time (now).
-;; In recursive blame mode: returns the newest commit timestamp
-;;   in the current view (simulates 'now' at that revision).
-
-;; This allows auto-calculation to work correctly in both modes:
-;; - Normal: 'recent' means recent from today
-;; - Recursive: 'recent' means recent from the revision date"
-;;   (if (and (boundp 'blame-reveal--current-revision)
-;;            blame-reveal--current-revision
-;;            (not (eq blame-reveal--current-revision 'uncommitted)))
-;;       ;; Recursive blame: find newest commit in current view
-;;       (let ((newest-ts nil))
-;;         (maphash (lambda (_commit info)
-;;                    (when-let ((ts (nth 4 info)))
-;;                      (when (or (not newest-ts) (> ts newest-ts))
-;;                        (setq newest-ts ts))))
-;;                  blame-reveal--commit-info)
-;;         (or newest-ts (float-time)))
-;;     ;; Normal blame: use current time
-;;     (float-time)))
-
 (defun blame-reveal--get-reference-time ()
   "Get reference time for age calculation."
   (if (and (boundp 'blame-reveal--current-revision)
