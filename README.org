@@ -111,7 +111,6 @@ M-x blame-reveal-mode
 #+end_src
 
 ** Configuration
-
 *** Recommended Configuration
 
 #+begin_src elisp
@@ -130,6 +129,30 @@ M-x blame-reveal-mode
 
   ;; Enable recursive blame
   (require 'blame-reveal-recursive))
+#+end_src
+
+*** Understanding Color Configuration
+
+blame-reveal uses a smart color system to highlight recent commits. See [[file:understanding-color-configuration.org][detailed color configuration guide]] for:
+
+- How the three-step color pipeline works
+- Auto-calculation algorithm
+- Common configuration recipes
+- Visual examples
+
+Quick reference:
+#+begin_src elisp
+;; Smart defaults (recommended)
+(setq blame-reveal-recent-days-limit 'auto
+      blame-reveal-gradient-quality 'auto)
+
+;; Best clarity (very active files)
+(setq blame-reveal-recent-days-limit 'auto
+      blame-reveal-gradient-quality 'strict)
+
+;; More history (exploration)
+(setq blame-reveal-recent-days-limit 'auto
+      blame-reveal-gradient-quality 'relaxed)
 #+end_src
 
 *** Key Options
