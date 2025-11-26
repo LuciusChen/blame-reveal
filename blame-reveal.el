@@ -504,7 +504,7 @@ overlays appear with more delay."
   :type 'number
   :group 'blame-reveal)
 
-(defcustom blame-reveal-lazy-load-threshold 2000
+(defcustom blame-reveal-lazy-load-threshold 3000
   "File size threshold (in lines) for lazy loading.
 Files larger than this will use lazy loading (only blame visible region).
 Smaller files will load completely for better recursive blame experience.
@@ -557,6 +557,152 @@ For small files, sync loading is actually faster due to less overhead."
     ('auto (blame-reveal--should-lazy-load-p))  ; Use async for large files
     ('t t)                                       ; Always async
     (_ nil)))                                    ; Always sync
+
+(defun blame-reveal--build-blame-command-args (start-line end-line relative-file)
+  "Build git blame command arguments.
+START-LINE and END-LINE specify optional line range.
+RELATIVE-FILE is the file path relative to git root."
+  (let ((args (list "blame" "--porcelain")))
+    ;; Add line range if provided
+    (when (and start-line end-line)
+      (setq args (append args (list "-L" (format "%d,%d" start-line end-line)))))
+    ;; Add revision if in recursive blame mode
+    (when (and (boundp 'blame-reveal--current-revision)
+               blame-reveal--current-revision
+               (not (eq blame-reveal--current-revision 'uncommitted)))
+      (setq args (append args (list blame-reveal--current-revision))))
+    ;; Add file at the end
+    (append args (list relative-file))))
+
+(defun blame-reveal--cleanup-async-state (process-var buffer-var)
+  "Cleanup async process and buffer.
+PROCESS-VAR is the symbol holding the process.
+BUFFER-VAR is the symbol holding the buffer."
+  (when-let ((proc (symbol-value process-var)))
+    (when (process-live-p proc)
+      (delete-process proc))
+    (set process-var nil))
+  (when-let ((buf (symbol-value buffer-var)))
+    (when (buffer-live-p buf)
+      (kill-buffer buf))
+    (set buffer-var nil)))
+
+(defun blame-reveal--make-async-sentinel (source-buffer temp-buffer success-handler
+                                                        process-var buffer-var
+                                                        &optional error-handler)
+  "Create a process sentinel for async blame loading.
+SOURCE-BUFFER is the buffer where blame is displayed.
+TEMP-BUFFER is the temporary buffer receiving git output.
+SUCCESS-HANDLER is called on success with TEMP-BUFFER.
+PROCESS-VAR and BUFFER-VAR are symbols to cleanup on failure.
+ERROR-HANDLER is optional function called on error in source buffer."
+  `(lambda (proc event)
+     (cond
+      ((string-match-p "finished" event)
+       (when (buffer-live-p ,source-buffer)
+         (with-current-buffer ,source-buffer
+           (funcall ,success-handler ,temp-buffer))))
+
+      ((string-match-p "exited abnormally" event)
+       (message "Async blame failed: %s" event)
+       (when (buffer-live-p ,temp-buffer)
+         (with-current-buffer ,temp-buffer
+           (message "Git error: %s" (buffer-string)))
+         (kill-buffer ,temp-buffer))
+       (when (buffer-live-p ,source-buffer)
+         (with-current-buffer ,source-buffer
+           (set ',process-var nil)
+           (set ',buffer-var nil)
+           (setq blame-reveal--loading nil)
+           ;; Call optional error handler
+           ,(when error-handler
+              `(funcall ,error-handler))))))))
+
+(defun blame-reveal--start-async-blame (process-var buffer-var buffer-name
+                                                    process-name start-line end-line
+                                                    success-handler
+                                                    &optional error-handler)
+  "Start async git blame process.
+PROCESS-VAR: Symbol for storing the process.
+BUFFER-VAR: Symbol for storing the temp buffer.
+BUFFER-NAME: Name for the temp buffer.
+PROCESS-NAME: Name for the process.
+START-LINE, END-LINE: Optional line range.
+SUCCESS-HANDLER: Function called on success with temp buffer.
+ERROR-HANDLER: Optional function called on error in source buffer.
+
+Note: Must be called with the source buffer as current-buffer."
+  (let* ((file (buffer-file-name))
+         (git-root (and file (vc-git-root file)))
+         (source-buffer (current-buffer)))
+
+    (unless git-root
+      (setq blame-reveal--loading nil)
+      (message "File is not in a git repository")
+      (error "File is not in a git repository"))
+
+    ;; Cancel existing process
+    (blame-reveal--cleanup-async-state process-var buffer-var)
+
+    (let* ((default-directory git-root)
+           (relative-file (file-relative-name file git-root))
+           (temp-buffer (generate-new-buffer buffer-name))
+           (process-environment (cons "GIT_PAGER=cat"
+                                      (cons "PAGER=cat"
+                                            process-environment))))
+
+      (set buffer-var temp-buffer)
+
+      (let ((args (blame-reveal--build-blame-command-args
+                   start-line end-line relative-file)))
+
+        (set process-var
+             (make-process
+              :name process-name
+              :buffer temp-buffer
+              :command (cons "git" args)
+              :sentinel (blame-reveal--make-async-sentinel
+                         source-buffer temp-buffer success-handler
+                         process-var buffer-var error-handler)
+              :noquery t))))))
+
+(defun blame-reveal--get-header-faces (color)
+  "Get face definitions for header, metadata, and description with COLOR."
+  (let ((header-weight blame-reveal-header-weight)
+        (header-height blame-reveal-header-height)
+        (metadata-weight blame-reveal-metadata-weight)
+        (metadata-height blame-reveal-metadata-height)
+        (description-weight blame-reveal-description-weight)
+        (description-height blame-reveal-description-height)
+        (bg (face-background 'default)))
+    (pcase blame-reveal-display-style
+      ('background
+       (list :header (list :foreground color :weight header-weight
+                           :height header-height :background bg)
+             :metadata (list :foreground color :weight metadata-weight
+                             :height metadata-height :background bg)
+             :description (list :foreground color :weight description-weight
+                                :height description-height :background bg)))
+      ('box
+       (let ((box-style (list :line-width 1 :color color)))
+         (list :header (list :foreground color :weight header-weight
+                             :height header-height :box box-style :background bg)
+               :metadata (list :foreground color :weight metadata-weight
+                               :height metadata-height :box box-style :background bg)
+               :description (list :foreground color :weight description-weight
+                                  :height description-height :box box-style :background bg))))
+      ('inverse
+       (list :header (list :background color :weight header-weight :height header-height)
+             :metadata (list :background color :weight metadata-weight :height metadata-height)
+             :description (list :background color :weight description-weight
+                                :height description-height)))
+      (_
+       (list :header (list :foreground color :weight header-weight
+                           :height header-height :background bg)
+             :metadata (list :foreground color :weight metadata-weight
+                             :height metadata-height :background bg)
+             :description (list :foreground color :weight description-weight
+                                :height description-height :background bg))))))
 
 
 ;;;; Parse Function (Shared by Sync and Async)
@@ -786,83 +932,26 @@ Returns (SHORT-HASH AUTHOR DATE SUMMARY TIMESTAMP DESCRIPTION)."
 
 (defun blame-reveal--load-blame-data-async ()
   "Asynchronously load initial blame data."
-  (let* ((file (buffer-file-name))
-         (git-root (and file (vc-git-root file)))
-         (use-lazy (blame-reveal--should-lazy-load-p))
-         (source-buffer (current-buffer)))
+  (let* ((use-lazy (blame-reveal--should-lazy-load-p))
+         (range (when use-lazy (blame-reveal--get-visible-line-range)))
+         (start-line (when use-lazy (car range)))
+         (end-line (when use-lazy (cdr range))))
 
-    (unless git-root
-      (setq blame-reveal--loading nil)
-      (message "File is not in a git repository")
-      (return))
+    ;; Print loading message
+    (if use-lazy
+        (message "Loading git blame (async, lazy): lines %d-%d..." start-line end-line)
+      (message "Loading git blame (async, full)..."))
 
-    ;; Cancel any existing process
-    (when blame-reveal--initial-load-process
-      (delete-process blame-reveal--initial-load-process)
-      (setq blame-reveal--initial-load-process nil))
-
-    (when blame-reveal--initial-load-buffer
-      (kill-buffer blame-reveal--initial-load-buffer)
-      (setq blame-reveal--initial-load-buffer nil))
-
-    (let* ((default-directory git-root)
-           (relative-file (file-relative-name file git-root))
-           (temp-buffer (generate-new-buffer " *blame-initial-load*"))
-           (process-environment (cons "GIT_PAGER=cat"
-                                      (cons "PAGER=cat"
-                                            process-environment))))
-
-      (setq blame-reveal--initial-load-buffer temp-buffer)
-
-      ;; Build command args
-      (let ((args (list "blame" "--porcelain")))
-
-        ;; Add line range for lazy loading
-        (when use-lazy
-          (let* ((range (with-current-buffer source-buffer
-                          (blame-reveal--get-visible-line-range)))
-                 (start-line (car range))
-                 (end-line (cdr range)))
-            (setq args (append args (list "-L" (format "%d,%d" start-line end-line))))
-            (message "Loading git blame (async, lazy): lines %d-%d..." start-line end-line))
-          (message "Loading git blame (async, full)..."))
-
-        ;; Add revision if in recursive blame mode
-        (when (and (boundp 'blame-reveal--current-revision)
-                   blame-reveal--current-revision
-                   (not (eq blame-reveal--current-revision 'uncommitted)))
-          (setq args (append args (list blame-reveal--current-revision))))
-
-        ;; Add file at the end
-        (setq args (append args (list relative-file)))
-
-        ;; Start async process
-        (setq blame-reveal--initial-load-process
-              (make-process
-               :name "blame-initial-load"
-               :buffer temp-buffer
-               :command (cons "git" args)
-               :sentinel
-               `(lambda (proc event)
-                  (cond
-                   ((string-match-p "finished" event)
-                    (when (buffer-live-p ,source-buffer)
-                      (with-current-buffer ,source-buffer
-                        (blame-reveal--handle-initial-load-complete
-                         ,temp-buffer ,use-lazy))))
-
-                   ((string-match-p "exited abnormally" event)
-                    (message "Initial blame load failed: %s" event)
-                    (when (buffer-live-p ,temp-buffer)
-                      (with-current-buffer ,temp-buffer
-                        (message "Git error: %s" (buffer-string)))
-                      (kill-buffer ,temp-buffer))
-                    (when (buffer-live-p ,source-buffer)
-                      (with-current-buffer ,source-buffer
-                        (setq blame-reveal--initial-load-buffer nil)
-                        (setq blame-reveal--initial-load-process nil)
-                        (setq blame-reveal--loading nil))))))
-               :noquery t))))))
+    ;; Start async process
+    (blame-reveal--start-async-blame
+     'blame-reveal--initial-load-process
+     'blame-reveal--initial-load-buffer
+     " *blame-initial-load*"
+     "blame-initial-load"
+     start-line
+     end-line
+     (lambda (temp-buffer)
+       (blame-reveal--handle-initial-load-complete temp-buffer use-lazy)))))
 
 (defun blame-reveal--handle-initial-load-complete (temp-buffer use-lazy)
   "Handle completion of initial async blame loading from TEMP-BUFFER."
@@ -908,70 +997,23 @@ Returns (SHORT-HASH AUTHOR DATE SUMMARY TIMESTAMP DESCRIPTION)."
 
 (defun blame-reveal--expand-blame-data-async (start-line end-line)
   "Asynchronously expand blame data to include START-LINE to END-LINE."
-  ;; Cancel any ongoing expansion
-  (when blame-reveal--expansion-process
-    (delete-process blame-reveal--expansion-process)
-    (setq blame-reveal--expansion-process nil))
-
-  (when blame-reveal--expansion-buffer
-    (kill-buffer blame-reveal--expansion-buffer)
-    (setq blame-reveal--expansion-buffer nil))
-
   ;; Record pending expansion and set flag
   (setq blame-reveal--pending-expansion (cons start-line end-line))
   (setq blame-reveal--is-expanding t)
 
-  (let* ((file (buffer-file-name))
-         (git-root (vc-git-root file))
-         (default-directory git-root)
-         (relative-file (file-relative-name file git-root))
-         (source-buffer (current-buffer))
-         (temp-buffer (generate-new-buffer " *blame-expansion*"))
-         (process-environment (cons "GIT_PAGER=cat"
-                                    (cons "PAGER=cat"
-                                          process-environment))))
-
-    (setq blame-reveal--expansion-buffer temp-buffer)
-
-    ;; Build command args
-    (let ((args (list "blame" "--porcelain"
-                      "-L" (format "%d,%d" start-line end-line))))
-
-      ;; Add revision if in recursive blame mode
-      (when (and (boundp 'blame-reveal--current-revision)
-                 blame-reveal--current-revision
-                 (not (eq blame-reveal--current-revision 'uncommitted)))
-        (setq args (append args (list blame-reveal--current-revision))))
-
-      ;; Add file at the end
-      (setq args (append args (list relative-file)))
-
-      ;; Start async process
-      (setq blame-reveal--expansion-process
-            (make-process
-             :name "blame-expand"
-             :buffer temp-buffer
-             :command (cons "git" args)
-             :sentinel
-             `(lambda (proc event)
-                (cond
-                 ((string-match-p "finished" event)
-                  (when (buffer-live-p ,source-buffer)
-                    (with-current-buffer ,source-buffer
-                      (blame-reveal--handle-expansion-complete
-                       ,temp-buffer ,start-line ,end-line))))
-
-                 ((string-match-p "exited abnormally" event)
-                  (message "Async blame expansion failed: %s" event)
-                  (when (buffer-live-p ,temp-buffer)
-                    (kill-buffer ,temp-buffer))
-                  (when (buffer-live-p ,source-buffer)
-                    (with-current-buffer ,source-buffer
-                      (setq blame-reveal--expansion-buffer nil)
-                      (setq blame-reveal--expansion-process nil)
-                      (setq blame-reveal--pending-expansion nil)
-                      (setq blame-reveal--is-expanding nil))))))
-             :noquery t)))))
+  (blame-reveal--start-async-blame
+   'blame-reveal--expansion-process
+   'blame-reveal--expansion-buffer
+   " *blame-expansion*"
+   "blame-expand"
+   start-line
+   end-line
+   (lambda (temp-buffer)
+     (blame-reveal--handle-expansion-complete temp-buffer start-line end-line))
+   ;; Error handler: cleanup expansion-specific state
+   (lambda ()
+     (setq blame-reveal--pending-expansion nil)
+     (setq blame-reveal--is-expanding nil))))
 
 (defun blame-reveal--handle-expansion-complete (temp-buffer start-line end-line)
   "Handle completion of async blame expansion from TEMP-BUFFER."
@@ -1675,74 +1717,48 @@ Returns t if all conditions are met:
 Returns the created overlay."
   (save-excursion
     (goto-char (window-start))
-    (let* ((pos (line-beginning-position))
-           (is-uncommitted (blame-reveal--is-uncommitted-p commit-hash))
-           (color (blame-reveal--get-commit-color commit-hash))
-           (header-text (blame-reveal--format-header-text commit-hash))
-           (overlay (make-overlay pos pos))
-           (fringe-face (blame-reveal--ensure-fringe-face color))
-           (hide-fringe (and is-uncommitted
-                             (not blame-reveal-show-uncommitted-fringe))))
+    (pcase-let* ((pos (line-beginning-position))
+                 (`(,color ,_is-uncommitted ,_is-old-commit ,hide-fringe)
+                  (blame-reveal--get-commit-display-info commit-hash))
+                 (header-text (blame-reveal--format-header-text commit-hash))
+                 (overlay (make-overlay pos pos))
+                 (fringe-face (blame-reveal--ensure-fringe-face color))
+                 (faces (blame-reveal--get-header-faces color))
+                 (header-face (plist-get faces :header))
+                 (metadata-face (plist-get faces :metadata))
+                 (header-lines (split-string header-text "\n"))
+                 (sticky-indicator (propertize " " 'face `(:foreground ,color))))
 
-      ;; Use same styling as regular header
-      (let* ((header-weight blame-reveal-header-weight)
-             (header-height blame-reveal-header-height)
-             (metadata-weight blame-reveal-metadata-weight)
-             (metadata-height blame-reveal-metadata-height)
-
-             (header-face (pcase blame-reveal-display-style
-                            ('background (list :foreground color :weight header-weight
-                                               :height header-height :background (face-background 'default)))
-                            ('box (list :foreground color :weight header-weight :height header-height
-                                        :box (list :line-width 1 :color color)
-                                        :background (face-background 'default)))
-                            ('inverse (list :background color :weight header-weight :height header-height))
-                            (_ (list :foreground color :weight header-weight :height header-height
-                                     :background (face-background 'default)))))
-
-             (metadata-face (pcase blame-reveal-display-style
-                              ('background (list :foreground color :weight metadata-weight
-                                                 :height metadata-height :background (face-background 'default)))
-                              ('box (list :foreground color :weight metadata-weight :height metadata-height
-                                          :box (list :line-width 1 :color color)
-                                          :background (face-background 'default)))
-                              ('inverse (list :background color :weight metadata-weight :height metadata-height))
-                              (_ (list :foreground color :weight metadata-weight :height metadata-height
-                                       :background (face-background 'default)))))
-
-             (header-lines (split-string header-text "\n"))
-             (sticky-indicator (propertize " " 'face `(:foreground ,color))))
-
-        (overlay-put overlay 'blame-reveal-sticky t)
-        (overlay-put overlay 'before-string
-                     (concat
-                      ;; First line with fringe
-                      (unless hide-fringe
-                        (propertize "!" 'display
-                                    (list blame-reveal-style
-                                          'blame-reveal-full
-                                          fringe-face)))
-                      sticky-indicator
-                      (propertize (car header-lines) 'face header-face)
-                      "\n"
-                      ;; Second line with fringe (if exists)
-                      (when (cdr header-lines)
-                        (concat
-                         (unless hide-fringe
-                           (propertize "!" 'display
-                                       (list blame-reveal-style
-                                             'blame-reveal-full
-                                             fringe-face)))
-                         sticky-indicator
-                         (propertize (cadr header-lines) 'face metadata-face)
-                         "\n"))
-                      ;; Final fringe line
-                      (unless hide-fringe
-                        (propertize "!" 'display
-                                    (list blame-reveal-style
-                                          'blame-reveal-full
-                                          fringe-face)))))
-        overlay))))
+      (overlay-put overlay 'blame-reveal-sticky t)
+      (overlay-put overlay 'before-string
+                   (concat
+                    ;; First line with fringe
+                    (unless hide-fringe
+                      (propertize "!" 'display
+                                  (list blame-reveal-style
+                                        'blame-reveal-full
+                                        fringe-face)))
+                    sticky-indicator
+                    (propertize (car header-lines) 'face header-face)
+                    "\n"
+                    ;; Second line with fringe (if exists)
+                    (when (cdr header-lines)
+                      (concat
+                       (unless hide-fringe
+                         (propertize "!" 'display
+                                     (list blame-reveal-style
+                                           'blame-reveal-full
+                                           fringe-face)))
+                       sticky-indicator
+                       (propertize (cadr header-lines) 'face metadata-face)
+                       "\n"))
+                    ;; Final fringe line
+                    (unless hide-fringe
+                      (propertize "!" 'display
+                                  (list blame-reveal-style
+                                        'blame-reveal-full
+                                        fringe-face)))))
+      overlay)))
 
 (defun blame-reveal--update-sticky-header ()
   "Update sticky header display based on cursor position.
@@ -1892,34 +1908,10 @@ If NO-FRINGE is non-nil, don't show fringe indicators."
         (let* ((overlay (make-overlay pos pos))
                (header-text (blame-reveal--format-header-text commit-hash))
                (fringe-face (blame-reveal--ensure-fringe-face color))
-               ;; Get configured weights and heights
-               (header-weight blame-reveal-header-weight)
-               (header-height blame-reveal-header-height)
-               (metadata-weight blame-reveal-metadata-weight)
-               (metadata-height blame-reveal-metadata-height)
-               (description-weight blame-reveal-description-weight)
-               (description-height blame-reveal-description-height)
-               ;; Header line style
-               (header-face (pcase blame-reveal-display-style
-                              ('background (list :foreground color :weight header-weight :height header-height))
-                              ('box (list :foreground color :weight header-weight :height header-height
-                                          :box (list :line-width 1 :color color)))
-                              ('inverse (list :background color :weight header-weight :height header-height))
-                              (_ (list :foreground color :weight header-weight :height header-height))))
-               ;; Metadata line style
-               (metadata-face (pcase blame-reveal-display-style
-                                ('background (list :foreground color :weight metadata-weight :height metadata-height))
-                                ('box (list :foreground color :weight metadata-weight :height metadata-height
-                                            :box (list :line-width 1 :color color)))
-                                ('inverse (list :background color :weight metadata-weight :height metadata-height))
-                                (_ (list :foreground color :weight metadata-weight :height metadata-height))))
-               ;; Description line style
-               (description-face (pcase blame-reveal-display-style
-                                   ('background (list :foreground color :weight description-weight :height description-height))
-                                   ('box (list :foreground color :weight description-weight :height description-height
-                                               :box (list :line-width 1 :color color)))
-                                   ('inverse (list :background color :weight description-weight :height description-height))
-                                   (_ (list :foreground color :weight description-weight :height description-height))))
+               (faces (blame-reveal--get-header-faces color))
+               (header-face (plist-get faces :header))
+               (metadata-face (plist-get faces :metadata))
+               (description-face (plist-get faces :description))
                ;; Split header text into lines
                (header-lines (split-string header-text "\n"))
                ;; Need leading newline if inserting at end of line (except for line 1)
@@ -2338,70 +2330,61 @@ Use lazy loading for large files, full loading for small files."
   "Implementation of header update."
   (when blame-reveal--blame-data
     ;; First, ensure visible commits have their info loaded
-    ;; This is where we do the expensive git show operations
     (blame-reveal--ensure-visible-commits-loaded)
-    (let ((current-block (blame-reveal--get-current-block)))
-      (if current-block
-          (let* ((commit-hash (car current-block))
-                 (block-start (cdr current-block)))
 
-            ;; If entered a new block
-            (unless (equal commit-hash blame-reveal--current-block-commit)
-              ;; Clean up the previous block's overlay (if exists and different)
-              (when (and blame-reveal--last-rendered-commit
-                         (not (equal blame-reveal--last-rendered-commit commit-hash)))
-                (blame-reveal--clear-temp-overlays-for-commit
-                 blame-reveal--last-rendered-commit))
+    (if-let ((current-block (blame-reveal--get-current-block)))
+        ;; Has block: render header and overlays
+        (let* ((commit-hash (car current-block))
+               (block-start (cdr current-block)))
 
-              ;; Update current block (but don't render yet)
-              (setq blame-reveal--current-block-commit commit-hash))
+          ;; If entered a new block
+          (unless (equal commit-hash blame-reveal--current-block-commit)
+            (setq blame-reveal--current-block-commit commit-hash))
 
-            ;; Only render the current block when stopped
-            (pcase-let ((`(,color ,is-uncommitted ,is-old-commit ,hide-header-fringe)
-                         (blame-reveal--get-commit-display-info commit-hash)))
+          ;; Only render the current block when stopped
+          (pcase-let ((`(,color ,is-uncommitted ,is-old-commit ,hide-header-fringe)
+                       (blame-reveal--get-commit-display-info commit-hash)))
 
-              ;; Cancel any pending temp overlay rendering
-              (when blame-reveal--temp-overlay-timer
-                (cancel-timer blame-reveal--temp-overlay-timer)
-                (setq blame-reveal--temp-overlay-timer nil))
+            ;; Cancel any pending temp overlay rendering
+            (when blame-reveal--temp-overlay-timer
+              (cancel-timer blame-reveal--temp-overlay-timer)
+              (setq blame-reveal--temp-overlay-timer nil))
 
-              ;; Clear previous header
-              (when blame-reveal--header-overlay
-                (delete-overlay blame-reveal--header-overlay)
-                (setq blame-reveal--header-overlay nil))
+            ;; Clear previous header
+            (when blame-reveal--header-overlay
+              (delete-overlay blame-reveal--header-overlay)
+              (setq blame-reveal--header-overlay nil))
 
-              ;; Create new header only if layout is not 'none
-              (unless (eq blame-reveal-display-layout 'none)
-                (setq blame-reveal--header-overlay
-                      (blame-reveal--create-header-overlay
-                       block-start commit-hash color hide-header-fringe)))
+            ;; Create new header only if layout is not 'none
+            (unless (eq blame-reveal-display-layout 'none)
+              (setq blame-reveal--header-overlay
+                    (blame-reveal--create-header-overlay
+                     block-start commit-hash color hide-header-fringe)))
 
-              ;; Show temp fringe overlay for old commits or uncommitted changes
-              (when (or is-old-commit
-                        (and is-uncommitted blame-reveal-show-uncommitted-fringe))
-                (setq blame-reveal--temp-overlay-timer
-                      (run-with-idle-timer
-                       blame-reveal-temp-overlay-delay nil
-                       #'blame-reveal--temp-overlay-renderer
-                       (current-buffer) commit-hash color))
+            ;; Show temp fringe overlay for old commits or uncommitted changes
+            (when (or is-old-commit
+                      (and is-uncommitted blame-reveal-show-uncommitted-fringe))
+              (setq blame-reveal--temp-overlay-timer
+                    (run-with-idle-timer
+                     blame-reveal-temp-overlay-delay nil
+                     #'blame-reveal--temp-overlay-renderer
+                     (current-buffer) commit-hash color)))
+            (setq blame-reveal--last-rendered-commit commit-hash)))
 
-                ;; Record the rendered block
-                (setq blame-reveal--last-rendered-commit commit-hash))))
+      ;; No current block - completely left all blocks - CLEANUP!
+      (when blame-reveal--temp-overlay-timer
+        (cancel-timer blame-reveal--temp-overlay-timer)
+        (setq blame-reveal--temp-overlay-timer nil))
+      (when blame-reveal--header-overlay
+        (delete-overlay blame-reveal--header-overlay)
+        (setq blame-reveal--header-overlay nil))
+      (blame-reveal--clear-temp-overlays)
+      (setq blame-reveal--current-block-commit nil)
+      (setq blame-reveal--last-rendered-commit nil))
 
-        ;; No current block - completely left all blocks
-        (when blame-reveal--temp-overlay-timer
-          (cancel-timer blame-reveal--temp-overlay-timer)
-          (setq blame-reveal--temp-overlay-timer nil))
-        (when blame-reveal--header-overlay
-          (delete-overlay blame-reveal--header-overlay)
-          (setq blame-reveal--header-overlay nil))
-        (blame-reveal--clear-temp-overlays)
-        (setq blame-reveal--current-block-commit nil)
-        (setq blame-reveal--last-rendered-commit nil))
-
-      ;; Only update sticky header if layout is not 'none
-      (unless (eq blame-reveal-display-layout 'none)
-        (blame-reveal--update-sticky-header)))))
+    ;; Only update sticky header if layout is not 'none
+    (unless (eq blame-reveal-display-layout 'none)
+      (blame-reveal--update-sticky-header))))
 
 (defun blame-reveal--update-header ()
   "Update header display based on current cursor position.
@@ -2723,26 +2706,12 @@ and debugging color gradient issues."
 
 (defun blame-reveal--cleanup-async-processes ()
   "Cleanup all async processes and buffers."
-  ;; Cleanup expansion
-  (when blame-reveal--expansion-process
-    (delete-process blame-reveal--expansion-process)
-    (setq blame-reveal--expansion-process nil))
-
-  (when blame-reveal--expansion-buffer
-    (kill-buffer blame-reveal--expansion-buffer)
-    (setq blame-reveal--expansion-buffer nil))
-
+  (blame-reveal--cleanup-async-state 'blame-reveal--expansion-process
+                                     'blame-reveal--expansion-buffer)
+  (blame-reveal--cleanup-async-state 'blame-reveal--initial-load-process
+                                     'blame-reveal--initial-load-buffer)
   (setq blame-reveal--pending-expansion nil)
-  (setq blame-reveal--is-expanding nil)
-
-  ;; Cleanup initial load
-  (when blame-reveal--initial-load-process
-    (delete-process blame-reveal--initial-load-process)
-    (setq blame-reveal--initial-load-process nil))
-
-  (when blame-reveal--initial-load-buffer
-    (kill-buffer blame-reveal--initial-load-buffer)
-    (setq blame-reveal--initial-load-buffer nil)))
+  (setq blame-reveal--is-expanding nil))
 
 ;;;###autoload
 (defun blame-reveal-clear-auto-cache ()
@@ -2957,8 +2926,6 @@ This function always uses built-in git."
       (setq blame-reveal--header-update-timer nil))
 
     (blame-reveal--clear-overlays)
-
-    (setq blame-reveal--last-rendered-commit nil)
 
     (remove-hook 'after-save-hook #'blame-reveal--full-update t)
     (remove-hook 'window-scroll-functions #'blame-reveal--scroll-handler t)
