@@ -41,6 +41,7 @@ Combined with [[https://github.com/dgutov/diff-hl][diff-hl]] for uncommitted cha
 - Sticky headers when scrolled off-screen
 - Theme-aware with smooth transitions
 - Overlay reuse minimizes flicker
+- *Smooth loading animation* with interpolated gradient trail (easter egg: see =blame-reveal-ui.el=)
 
 *** Recursive Blame
 
@@ -242,6 +243,26 @@ Only applies when =recent-days-limit= is ='auto=:
 ;; Render margin
 (setq blame-reveal-render-margin 50)  ; Lines beyond viewport
 #+end_src
+
+*** Loading Animation (Easter Egg)
+
+The loading animation uses smooth interpolation for a polished effect:
+
+#+begin_src elisp
+;; Animation speed (default: 0.08 seconds per frame)
+(setq blame-reveal-loading-animation-speed 0.08)
+
+;; Frames per step (default: 4 frames for smooth interpolation)
+(setq blame-reveal-loading-animation-frames-per-step 4)
+#+end_src
+
+The animation creates a *gradient trail* that moves smoothly through the fringe:
+- 6 indicators with exponential decay
+- Sub-step interpolation between positions (0.0 → 1.0)
+- Dynamic color intensity based on distance from center
+- Seamless cycling using normalized offsets
+
+See =blame-reveal--create-loading-animation= in =blame-reveal-ui.el= for implementation details. By default, use =blame-reveal-lazy-load-threshold= to determine whether to load asynchronously with animation, or force asynchronous loading to always have animation, or force synchronous loading to always.
 
 ** Debugging
 
