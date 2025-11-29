@@ -26,7 +26,7 @@ Uses nerd-icons if available, otherwise falls back to unicode arrow."
        :color color)
     (pcase-let ((`(,short-hash ,author ,_date ,summary ,_timestamp ,_description) commit-info))
       (make-blame-reveal-commit-display
-       :lines (list (format "▸ %s · %s · %s" summary short-hash author))
+       :lines (list (format "▸ %s · %s · %s" author summary short-hash))
        :faces (list `(:foreground ,color :weight bold))
        :color color))))
 

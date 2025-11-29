@@ -26,14 +26,6 @@ Combined with [[https://github.com/dgutov/diff-hl][diff-hl]] for uncommitted cha
 
 *Auto-calculation (default)*: Adapts to commit frequency and ensures good color distinction.
 
-#+begin_src
-Active file (100 commits/30 days) → ~14 days, ~20 commits
-Quiet file (10 commits/180 days) → ~60 days, all 10 commits
-Recursive blame at old revision → relative to that point in time
-#+end_src
-
-*Quality control*: Balance coverage vs. distinction
-
 | Mode    | Commits | Color Step | Best For              |
 |---------+---------+------------+-----------------------|
 | strict  | 5-10    | 3-5%       | Many commits          |
@@ -42,12 +34,13 @@ Recursive blame at old revision → relative to that point in time
 
 *Fixed days*: =30=, =90=, =180=, =365=, or =nil= (all commits, relative coloring)
 
-*** Visual Indicators
+*** Visual Features
 
-- *Fringe colors*: IntelliJ IDEA style gradient (newest = brightest)
-- *Headers*: Inline commit info with layouts (=none=, =line=, =compact=, =full=)
-- *Sticky headers*: Auto-show when scrolled off-screen
-- *Theme-aware*: Adapts to dark/light themes
+- Fringe colors with IntelliJ IDEA style gradient (newest = brightest)
+- Headers with customizable formatting and position
+- Sticky headers when scrolled off-screen
+- Theme-aware with smooth transitions
+- Overlay reuse minimizes flicker
 
 *** Recursive Blame
 
@@ -59,20 +52,16 @@ HEAD: Bob (def456)
 def456^: Charlie (ghi789)
   ↓ Press 'b'
 ghi789^: Dave (jkl012) ← Original author
-  ↓ Press 'r'
-HEAD: Back to present
 #+end_example
 
 *** Performance
 
-| Feature           | Value  | Note                |
-|-------------------+--------+---------------------|
-| Initial load      | <100ms | Viewport only       |
-| Scroll            | <50ms  | Debounced           |
-| Recursive blame   | <200ms | Full file           |
-| Memory            | ~1-2MB | Per buffer          |
-| Large files       | 10k+   | Lazy load threshold |
-| Async loading     | ✓      | Optional (auto/on/off)|
+| Metric            | Value  |
+|-------------------+--------|
+| Initial load      | <100ms |
+| Scroll            | <50ms  |
+| Recursive blame   | <200ms |
+| Large files       | 10k+   |
 
 *** Commands
 
@@ -89,7 +78,7 @@ HEAD: Back to present
 | =g=     | Blame at revision       |
 | =r=     | Reset to HEAD           |
 
-** Installation & Usage
+** Installation
 
 #+begin_src elisp
 ;; Manual
@@ -103,42 +92,47 @@ HEAD: Back to present
   :commands blame-reveal-mode
   :config
   (require 'blame-reveal-recursive))
+#+end_src
 
-;; Enable
+** Quick Start
+
+#+begin_src elisp
+;; Enable in current buffer
 M-x blame-reveal-mode
-;; or
+
+;; Or enable for all programming modes
 (add-hook 'prog-mode-hook #'blame-reveal-mode)
 #+end_src
 
 ** Configuration
-*** Recommended Configuration
+
+*** Recommended Setup
 
 #+begin_src elisp
 (use-package blame-reveal
   :config
   ;; Smart time-based selection
-  (setq blame-reveal-recent-days-limit 'auto)        ; Adapt to commit frequency
-  (setq blame-reveal-gradient-quality 'auto)         ; Balanced quality
+  (setq blame-reveal-recent-days-limit 'auto)
+  (setq blame-reveal-gradient-quality 'auto)
 
   ;; Display
-  (setq blame-reveal-display-layout 'compact)        ; Show commit info
-  (setq blame-reveal-show-uncommitted-fringe nil)    ; Use diff-hl instead
+  (setq blame-reveal-header-position 'before-block)
+  (setq blame-reveal-show-uncommitted-fringe nil)  ; Use with diff-hl
 
   ;; Performance
-  (setq blame-reveal-async-blame 'auto)              ; Async for large files
+  (setq blame-reveal-async-blame 'auto)
+  (setq blame-reveal-lazy-load-threshold 3000)
 
   ;; Enable recursive blame
   (require 'blame-reveal-recursive))
 #+end_src
 
-*** Understanding Color Configuration
+*** Understanding Colors
 
-blame-reveal uses a smart color system to highlight recent commits. See [[file:understanding-color-configuration.org][detailed color configuration guide]] for:
-
-- How the three-step color pipeline works
+See [[file:understanding-color-configuration.org][detailed color configuration guide]] for:
+- Three-step color pipeline
 - Auto-calculation algorithm
-- Common configuration recipes
-- Visual examples
+- Configuration recipes
 
 Quick reference:
 #+begin_src elisp
@@ -146,227 +140,150 @@ Quick reference:
 (setq blame-reveal-recent-days-limit 'auto
       blame-reveal-gradient-quality 'auto)
 
-;; Best clarity (very active files)
+;; Best clarity
 (setq blame-reveal-recent-days-limit 'auto
       blame-reveal-gradient-quality 'strict)
 
-;; More history (exploration)
+;; More history
 (setq blame-reveal-recent-days-limit 'auto
       blame-reveal-gradient-quality 'relaxed)
 #+end_src
 
-*** Key Options
-
-*Time-based selection*:
+*** Time Selection
 
 #+begin_src elisp
-;; Auto (recommended): adapts to commit frequency
+;; Auto (adapts to commit frequency)
 (setq blame-reveal-recent-days-limit 'auto)
 
 ;; Fixed days
 (setq blame-reveal-recent-days-limit 30)    ; Last month
 (setq blame-reveal-recent-days-limit 90)    ; Last quarter
-(setq blame-reveal-recent-days-limit nil)   ; All commits (relative coloring)
+(setq blame-reveal-recent-days-limit nil)   ; All commits
 #+end_src
 
-*Quality control* (for =auto= mode):
+*** Quality Control
+
+Only applies when =recent-days-limit= is ='auto=:
 
 #+begin_src elisp
-(setq blame-reveal-gradient-quality 'strict)   ; 5-10 commits, best distinction
-(setq blame-reveal-gradient-quality 'auto)     ; 10-20 commits, balanced
-(setq blame-reveal-gradient-quality 'relaxed)  ; 15-30 commits, more history
+(setq blame-reveal-gradient-quality 'strict)   ; 5-10 commits
+(setq blame-reveal-gradient-quality 'auto)     ; 10-20 commits
+(setq blame-reveal-gradient-quality 'relaxed)  ; 15-30 commits
 #+end_src
 
-*Display*:
+*** Display
 
 #+begin_src elisp
-;; Layout
-(setq blame-reveal-display-layout 'none)       ; No header (use 's' to view)
-(setq blame-reveal-display-layout 'line)       ; Message only
-(setq blame-reveal-display-layout 'compact)    ; Message + metadata
-(setq blame-reveal-display-layout 'full)       ; + description
+;; Header position
+(setq blame-reveal-header-position 'before-block)     ; Above first line
+(setq blame-reveal-header-position 'after-first-line) ; Inline
 
-;; Style
-(setq blame-reveal-display-style 'background)  ; Clean
-(setq blame-reveal-display-style 'box)         ; Boxed
-(setq blame-reveal-display-style 'inverse)     ; Inverted
+;; Fringe side
+(setq blame-reveal-style 'left-fringe)   ; Left (default)
+(setq blame-reveal-style 'right-fringe)  ; Right
 
-;; Fringe position
-(setq blame-reveal-style 'left-fringe)         ; Left side (default)
-(setq blame-reveal-style 'right-fringe)        ; Right side
+;; Uncommitted changes
+(setq blame-reveal-show-uncommitted-fringe nil)   ; Use diff-hl
+(setq blame-reveal-uncommitted-label "Uncommitted changes")
 #+end_src
 
-*Color scheme* (HSL):
+*** Custom Header Formatter
+
+#+begin_src elisp
+;; Define custom formatter
+(defun my-minimal-header (commit-hash info color)
+  "Minimal: just hash and message"
+  (pcase-let ((`(,hash ,_author ,_date ,msg ,_ts ,_desc) info))
+    (make-blame-reveal-commit-display
+     :lines (list (format "%s: %s" hash msg))
+     :faces (list `(:foreground ,color :weight bold))
+     :color color)))
+
+;; Apply it
+(setq blame-reveal-header-format-function #'my-minimal-header)
+
+;; Default formatter is blame-reveal-format-header-default
+#+end_src
+
+*** Color Scheme
 
 #+begin_src elisp
 ;; Default blue
 (setq blame-reveal-color-scheme
-      '(:hue 210                          ; 0=red, 120=green, 280=purple
-        :dark-newest 0.70                 ; Dark: higher = brighter
-        :dark-oldest 0.35
-        :light-newest 0.45                ; Light: lower = darker
-        :light-oldest 0.75
+      '(:hue 210
+        :dark-newest 0.70 :dark-oldest 0.35
+        :light-newest 0.45 :light-oldest 0.75
         :saturation-min 0.25 :saturation-max 0.60))
 
-;; Presets
+;; Green
 (setq blame-reveal-color-scheme
-      '(:hue 120 ...))                    ; Green
+      '(:hue 120 :dark-newest 0.70 :dark-oldest 0.35
+        :light-newest 0.40 :light-oldest 0.75
+        :saturation-min 0.25 :saturation-max 0.60))
+
+;; High contrast
 (setq blame-reveal-color-scheme
-      '(:hue 280 ...))                    ; Purple
+      '(:hue 210 :dark-newest 0.75 :dark-oldest 0.30
+        :light-newest 0.35 :light-oldest 0.85
+        :saturation-min 0.35 :saturation-max 0.70))
 #+end_src
 
-*Performance*:
+*** Performance
 
 #+begin_src elisp
 ;; Async loading
-(setq blame-reveal-async-blame 'auto)          ; Auto (large files only)
-(setq blame-reveal-async-blame t)              ; Always async
-(setq blame-reveal-async-blame nil)            ; Always sync
+(setq blame-reveal-async-blame 'auto)  ; Auto (large files only)
+(setq blame-reveal-async-blame t)      ; Always
+(setq blame-reveal-async-blame nil)    ; Never
 
-;; Lazy loading
-(setq blame-reveal-lazy-load-threshold 5000)   ; Files ≥ 5000 lines lazy load
-(setq blame-reveal-render-margin 50)           ; Lines beyond viewport
+;; Lazy loading threshold
+(setq blame-reveal-lazy-load-threshold 3000)  ; Lines
+
+;; Render margin
+(setq blame-reveal-render-margin 50)  ; Lines beyond viewport
 #+end_src
 
-** Debugging Auto-Calculation
-
-If colors seem off or you want to understand the auto mode:
+** Debugging
 
 #+begin_src elisp
-;; Show detailed calculation info
+;; Show auto-calculation details
 M-x blame-reveal-show-auto-calculation
 
-;; Output example:
-;; Auto calculation for current file:
-;; - Mode: Normal (HEAD)
-;; - Reference time: now
-;; - Total commits loaded: 45
-;; - Sample size: 15 commits
-;; - Sample time span: 37.2 days
-;; - Calculated limit: 67 days
-;; - Commits in range: 18
-;; - Gradient quality: Good (2.8% per commit)
-;; - Quality mode: auto
-
-;; Force recalculation (e.g., after changing quality setting)
+;; Force recalculation
 M-x blame-reveal-clear-auto-cache
 #+end_src
 
-** Advanced Usage
+** Architecture
 
-*** Project-Specific Configurations
+The codebase is modular with clear separation:
 
-#+begin_src elisp
-;; Very active project (many daily commits)
-(dir-locals-set-class-variables 'my-active-project
-  '((nil . ((blame-reveal-recent-days-limit . 7)          ; Show only last week
-            (blame-reveal-gradient-quality . strict)))))  ; Excellent distinction
-
-;; Inactive legacy project
-(dir-locals-set-class-variables 'my-legacy-project
-  '((nil . ((blame-reveal-recent-days-limit . 365)        ; Show last year
-            (blame-reveal-gradient-quality . relaxed))))) ; More history
-
-;; Large monorepo with big files
-(dir-locals-set-class-variables 'my-monorepo
-  '((nil . ((blame-reveal-lazy-load-threshold . 3000)     ; Aggressive lazy loading
-            (blame-reveal-render-margin . 100)            ; Larger render margin
-            (blame-reveal-async-blame . t)))))            ; Always async
-#+end_src
-
-*** Recursive Blame Workflows
-
-*Finding original author*:
-
-#+begin_example
-1. Navigate to line of interest
-2. Press 'b' repeatedly to go back in history
-3. Stop when you reach the original implementation
-4. Press 'r' to return to HEAD
-#+end_example
-
-*Tracking bug introduction*:
-
-#+begin_example
-1. Find buggy line at HEAD
-2. Press 'b' until bug disappears (code looks correct)
-3. The last commit where bug existed is the culprit
-4. Press 's' to see full commit message
-#+end_example
-
-*Exploring refactoring*:
-
-#+begin_example
-1. Find refactored code
-2. Press 'b' to see state before refactoring
-3. Press 'g' to jump to specific version (e.g., "v1.0")
-4. Compare implementations across time
-#+end_example
-
-*Mode line indicator*:
-
-#+begin_example
-Normal mode:     (no indicator)
-Recursive mode:  @abc123 Fix user login
-                 ↑       ↑
-                 commit  short message
-#+end_example
-
-*** Integration with Other Tools
-
-*With diff-hl (recommended)*:
-
-#+begin_src elisp
-(use-package diff-hl
-  :config
-  (global-diff-hl-mode)
-  (diff-hl-margin-mode)                         ; Show changes in margin/fringe
-  (add-hook 'magit-post-refresh-hook 'diff-hl-magit-post-refresh))
-
-(use-package blame-reveal
-  :config
-  (setq blame-reveal-show-uncommitted-fringe nil) ; Let diff-hl handle uncommitted
-  (setq blame-reveal-style 'left-fringe))       ; Put blame on left, changes on right
-#+end_src
-
-*With magit*:
-
-#+begin_src elisp
-(use-package magit
-  :config
-  (setq blame-reveal-use-magit t))              ; Use magit for commit details
-#+end_src
+| Module                   | Responsibility                     |
+|--------------------------+------------------------------------|
+| =blame-reveal-core=        | Data structures, buffer state      |
+| =blame-reveal-state=       | Async operation state machine      |
+| =blame-reveal-git=         | Git operations, blame parsing      |
+| =blame-reveal-overlay=     | Unified overlay management         |
+| =blame-reveal-color=       | Color strategy system              |
+| =blame-reveal-header=      | Header formatting                  |
+| =blame-reveal-ui=          | Rendering, scrolling, animations   |
+| =blame-reveal-commands=    | Interactive commands               |
+| =blame-reveal-recursive=   | Recursive blame navigation         |
 
 ** Troubleshooting
 
-| Issue                     | Solution                                              |
-|---------------------------+-------------------------------------------------------|
-| Colors too similar        | Use =strict= quality or fewer days                    |
-| Too few/many commits      | Set fixed days (e.g., =30=, =90=) or =nil= for all      |
-| Slow on large files       | Enable async: =(setq blame-reveal-async-blame t)=     |
-| Scroll lag                | Lower =lazy-load-threshold= (e.g., =2000=)            |
-| Missing fringe            | Check =blame-reveal-style=, enable fringe mode        |
-| Wrong auto-calculation    | =M-x blame-reveal-show-auto-calculation=              |
-| Pager error (delta/less)  | Fixed automatically (sets =GIT_PAGER=cat=)            |
-
-** Comparison
-
-| Feature               | blame-reveal | git-gutter+ | blamer.el | vc-annotate |
-|-----------------------+--------------+-------------+-----------+-------------|
-| Viewport rendering    | ✓            | ✗           | ✗         | ✗           |
-| Auto time selection   | ✓            | ✗           | ✗         | ✗           |
-| Quality control       | ✓            | ✗           | ✗         | ✗           |
-| Recursive blame       | ✓            | ✗           | ✗         | ~           |
-| Sticky headers        | ✓            | ✗           | ✗         | ✗           |
-| Async loading         | ✓            | ✗           | ✗         | ✗           |
-| Large files (10k+)    | ✓            | ~           | ✗         | ✗           |
+| Issue                  | Solution                                      |
+|------------------------+-----------------------------------------------|
+| Colors too similar     | Use =strict= quality or fewer days            |
+| Too few/many commits   | Set fixed days or =nil= for all               |
+| Slow on large files    | Enable async: =(setq ... 'async-blame t)=     |
+| Scroll lag             | Lower =lazy-load-threshold=                   |
+| Wrong auto-calculation | =M-x blame-reveal-show-auto-calculation=      |
 
 ** Requirements
 
 - Emacs 27.1+
 - Git CLI
-- Optional: Magit (for richer commit views)
-- Optional: diff-hl (for uncommitted changes)
+- Optional: Magit, diff-hl, nerd-icons
 
 ** License
 

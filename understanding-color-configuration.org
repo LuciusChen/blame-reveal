@@ -1,372 +1,244 @@
 * Understanding Color Configuration
 
-** Overview: The Three-Step Color Pipeline
+** The Three-Step Pipeline
 
 #+begin_example
-All Commits in File History
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                    ↓
-    ┌───────────────────────────────────────────────────────┐
-    │ Step 1: Time Window (recent-days-limit)               │
-    │ Decides: Which commits get gradient vs gray           │
-    └───────────────────────────────────────────────────────┘
-                    ↓
-    ┌───────────────────────────────────────────────────────┐
-    │ Step 2: Gradient Quality (gradient-quality)           │
-    │ Decides: How many commits in auto mode                │
-    └───────────────────────────────────────────────────────┘
-                    ↓
-    ┌───────────────────────────────────────────────────────┐
-    │ Step 3: Color Scheme (color-scheme)                   │
-    │ Decides: Hue, saturation, lightness range             │
-    └───────────────────────────────────────────────────────┘
-                    ↓
-            Colored Fringe Display
+All Commits → [Time Window] → [Quality Control] → [Color Scheme] → Display
+              recent-days      gradient-quality    color-scheme
 #+end_example
 
-** Step 1: Time Window Selection (~blame-reveal-recent-days-limit~)
+** Step 1: Time Window (~blame-reveal-recent-days-limit~)
 
-Controls *HOW MANY* commits get gradient colors vs gray.
+Decides *which* commits get gradient colors vs gray.
 
-*** Visual Comparison
+*** Options
+
+| Setting | Behavior                           | Use Case                |
+|---------+------------------------------------+-------------------------|
+| ~'auto~   | Adapt to file activity             | Recommended             |
+| ~90~      | Fixed 90 days                      | Predictable window      |
+| ~nil~     | All commits (relative colors)      | Like IntelliJ IDEA      |
+
+*** Visual
 
 #+begin_example
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Timeline (newest ← oldest):
+'auto (adaptive):
+  Now ◄─── calculated window ───► │ (old)
+  C1   C2   C3   C4   C5          │ C6  C7
+  🟦   🟦   🟦   🟦   🟦          ⬜  ⬜
 
-Option: 'auto (Recommended)
-───────────────────────────
-  Now                                                         2 years ago
-   │◄────── Auto-calculated ──────►│
-   ├─────┬─────┬─────┬─────┬───────┼────────────────────────────────────
-   │ C1  │ C2  │ C3  │ C4  │ C5    │ (old commits)
-   🟦    🟦    🟦    🟦    🟦       ⬜ ⬜ ⬜ ⬜
+90 (fixed):
+  Now ◄────── 90 days ─────────► │ (old)
+  C1   C2   ...  C15             │ C16  C17
+  🟦   🟦   🟦   🟦              ⬜  ⬜
 
-   Gradient (5-30 commits)          Gray (beyond window)
-
-Option: 90 (Fixed Days)
-───────────────────────
-  Now                                                         2 years ago
-   │◄──────── 90 days ──────────►│
-   ├─────┬─────┬─────┬────────────┼────────────────────────────────────
-   │ C1  │ C2  │ ... │ C15        │ (old commits)
-   🟦    🟦    🟦    🟦            ⬜ ⬜ ⬜ ⬜
-
-   All within 90 days               Beyond 90 days
-
-Option: nil (No Limit)
-──────────────────────
-  Now                                                         2 years ago
-   │◄──────────────── All commits ─────────────────────────────────────►│
-   ├─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┬──────
-   │ C1  │ C2  │ ... │ C50 │ ... │ C100│ ... │ C200│ ... │ C500│
-   🟦    🟦    🟦    🟦    🟦    🟦    🟦    🟦    🟦    🟦
-
-   Brightest                                                    Dimmest
+nil (all):
+  Now ◄──────── all commits ────────────────►
+  C1   C2   ...  C50   ...  C200   ...  C500
+  🟦   🟦   🟦   🟦   🟦   🟦   🟦   🟦
+  bright ────────────────────────────► dim
 #+end_example
 
-*** Behavior Summary
+** Step 2: Quality Control (~blame-reveal-gradient-quality~)
 
-| Setting | Window Size | Colored Commits | Use Case                 |
-|---------+-------------+-----------------+--------------------------|
-| ~'auto~   | Adaptive    | 5-30 (smart)    | Most files (recommended) |
-| ~90~      | Fixed       | All in 90 days  | Predictable window       |
-| ~180~     | Fixed       | All in 180 days | More history             |
-| ~365~     | Fixed       | All in 365 days | Full year                |
-| ~nil~     | Unlimited   | All commits     | IntelliJ IDEA style      |
+Only applies when ~recent-days-limit~ is ~'auto~. Controls trade-off between coverage and color distinction.
 
-** Step 2: Gradient Quality (~blame-reveal-gradient-quality~)
+*** Settings
 
-*Only affects ~'auto~ mode.* Controls the trade-off between time coverage and color distinction.
+| Mode      | Commits | Color Step | Window  | Best For          |
+|-----------+---------+------------+---------+-------------------|
+| ~'strict~   | 5-10    | 3-5%       | ~30d    | Very active files |
+| ~'auto~     | 10-20   | 2-3%       | ~90d    | Most files        |
+| ~'relaxed~  | 15-30   | 1.5-2%     | ~180d   | Quiet files       |
 
-*** Visual Comparison (Dark Theme)
+*** Visual (Dark Theme)
 
 #+begin_example
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+'strict (excellent distinction):
+C1    C2    C3    C4    C5    C6    C7    C8
+█████ ████▓ ███▓░ ██▓░░ █▓░░░ ▓░░░░ ░░░░░ ░░░░░
+70%   65%   60%   55%   50%   45%   40%   35%
 
-'strict Mode (5-10 commits, ~30 days)
-──────────────────────────────────────
-C1    C2    C3    C4    C5    C6    C7    C8      (old)
-█████ ████▓ ███▓░ ██▓░░ █▓░░░ ▓░░░░ ░░░░░ ░░░░░  ░░░░░
-70%   65%   60%   55%   50%   45%   40%   35%    (gray)
+'auto (balanced):
+C1    C2    C3    ...  C12   C13   C14   C15
+█████ ████▓ ███▓░ ░░░  ▓░░░  ░░░░  ░░░░  ░░░░
+70%   67%   64%   ...  43%   40%   37%   35%
 
-Color step: ~5% per commit
-✓ Excellent distinction
-✗ Shorter time coverage
-
-
-'auto Mode (10-20 commits, ~90 days)
-─────────────────────────────────────
-C1    C2    C3    C4    C5    ...  C12   C13   C14   C15   (old)
-█████ ████▓ ███▓░ ██▓░░ █▓░░░ ░░░  ▓░░░  ░░░░  ░░░░  ░░░░ ░░░░░
-70%   67%   64%   61%   58%   ...  43%   40%   37%   35%  (gray)
-
-Color step: ~2.5% per commit
-✓ Good balance
-✓ Reasonable coverage
-
-
-'relaxed Mode (15-30 commits, ~180 days)
-─────────────────────────────────────────
-C1    C2    C3    C4    ...  C15   ...  C25   C26   C27   C28   (old)
-█████ ████▓ ███▓░ ██▓░░ ░░░  █▓░░  ░░░  ▓░░░  ░░░░  ░░░░  ░░░░ ░░░░░
-70%   68%   66%   64%   ...  55%   ...  40%   38%   36%   35%  (gray)
-
-Color step: ~1.5% per commit
-✓ Maximum coverage
-✗ Subtle colors
+'relaxed (maximum history):
+C1    C2    ...  C15   ...  C25   C26   C27   C28
+█████ ████▓ ░░░  █▓░░  ░░░  ▓░░░  ░░░░  ░░░░  ░░░░
+70%   68%   ...  55%   ...  40%   38%   36%   35%
 #+end_example
 
-*** Auto-Calculation Algorithm
+*** The Algorithm
 
-#+begin_example
-Input: Your file's commit history
-  │
-  ├─► Sample recent commits (5-15)
-  │   └─► Calculate time span (e.g., 30 days)
-  │
-  ├─► Expand based on quality setting:
-  │   ├─ 'strict:  span × 1.2 → ~36 days  → ~8 commits
-  │   ├─ 'auto:    span × 1.8 → ~54 days  → ~15 commits
-  │   └─ 'relaxed: span × 2.5 → ~75 days  → ~25 commits
-  │
-  └─► Verify color quality:
-      ├─ If colors too similar → shrink window
-      └─ If wasting color range → expand window
-#+end_example
-
-*** Quality Settings
-
-| Setting   | Target Commits | Min Color Step | Time Window | Best For |
-|-----------+----------------+----------------+-------------+----------|
-| ~'strict~   | 5-10           | 3-5%           | ~30 days    | Very active files |
-| ~'auto~     | 10-20          | 2-3%           | ~90 days    | Most files |
-| ~'relaxed~  | 15-30          | 1.5-2%         | ~180 days   | Quiet files |
+#+begin_src
+1. Sample 5-15 most recent commits
+2. Calculate time span (e.g., 30 days)
+3. Extend by quality factor:
+   strict:  × 1.5 → ~45 days
+   auto:    × 1.8 → ~54 days
+   relaxed: × 2.5 → ~75 days
+4. Refine:
+   - If too few commits → expand
+   - If colors too similar → shrink
+   - If wasting color range → expand
+5. Cache result (invalidates on commit count change)
+#+end_src
 
 ** Step 3: Color Scheme (~blame-reveal-color-scheme~)
 
-Controls *HOW* the gradient looks.
+Controls *how* the gradient looks using HSL color space.
 
-*** Gradient Visualization (Dark Theme)
+*** Why HSL?
+
+- *Hue* (0-360°): Color family (210=blue, 120=green, 280=purple)
+- *Saturation* (0.0-1.0): Intensity (0=gray, 1=vivid)
+- *Lightness* (0.0-1.0): Brightness (dark theme: higher=brighter)
+
+*** Parameters
+
+| Parameter          | Controls                  | Dark    | Light   |
+|--------------------+---------------------------+---------+---------|
+| ~:hue~               | Color family              | 210     | same    |
+| ~:dark-newest~       | Newest (bright)           | 0.70    | N/A     |
+| ~:dark-oldest~       | Oldest (dark)             | 0.35    | N/A     |
+| ~:light-newest~      | Newest (dark)             | N/A     | 0.45    |
+| ~:light-oldest~      | Oldest (light)            | N/A     | 0.75    |
+| ~:saturation-min~    | Oldest saturation         | 0.25    | same    |
+| ~:saturation-max~    | Newest saturation         | 0.60    | same    |
+
+*** Visual
 
 #+begin_example
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Default Blue (hue=210):
+██████ █████▓ ████▓░ ███▓░░ ██▓░░░ █▓░░░░ ▓░░░░░
+L:70%  L:65%  L:60%  L:55%  L:50%  L:45%  L:40%
+S:60%  S:55%  S:50%  S:45%  S:40%  S:35%  S:30%
 
-Default Blue (Hue: 210)
-───────────────────────
-Newest ────────────────────────────────────────────────► Oldest
-██████ █████▓ ████▓░ ███▓░░ ██▓░░░ █▓░░░░ ▓░░░░░ ░░░░░░
-L:70%  L:65%  L:60%  L:55%  L:50%  L:45%  L:40%  L:35%
-S:60%  S:55%  S:50%  S:45%  S:40%  S:35%  S:30%  S:25%
+Green (hue=120):
+██████ █████▓ ████▓░ ███▓░░ ██▓░░░ █▓░░░░ ▓░░░░░
 
-Green (Hue: 120)
-────────────────
-██████ █████▓ ████▓░ ███▓░░ ██▓░░░ █▓░░░░ ▓░░░░░ ░░░░░░
-Bright green ───────────────────────────────► Dark green
-
-Purple (Hue: 280)
-─────────────────
-██████ █████▓ ████▓░ ███▓░░ ██▓░░░ █▓░░░░ ▓░░░░░ ░░░░░░
-Bright purple ──────────────────────────────► Dark purple
-
-High Contrast (Custom)
-──────────────────────
-██████ ████▓░ ██▓░░░ ▓░░░░░ ░░░░░░
-L:75%  L:60%  L:45%  L:30%  (gray)
-Larger steps = easier to distinguish
-
-Subtle (Custom)
-───────────────
-█████▓ ████▓░ ███▓░░ ██▓░░░ ░░░░░░
-L:60%  L:55%  L:50%  L:45%  (gray)
-Smaller steps = more subtle
+High Contrast:
+██████ ████▓░ ██▓░░░ ▓░░░░░
+L:75%  L:60%  L:45%  L:30%  (larger steps)
 #+end_example
 
-*** Key Parameters
+*** The Easing Function
 
-| Parameter          | Controls                    | Dark Theme      | Light Theme     |
-|--------------------+-----------------------------+-----------------+-----------------|
-| ~:hue~               | Color family                | 210 (blue)      | Same            |
-| ~:dark-newest~       | Newest commit brightness    | 0.70 (bright)   | N/A             |
-| ~:dark-oldest~       | Oldest commit brightness    | 0.35 (dark)     | N/A             |
-| ~:light-newest~      | Newest commit brightness    | N/A             | 0.45 (dark)     |
-| ~:light-oldest~      | Oldest commit brightness    | N/A             | 0.75 (light)    |
-| ~:saturation-min~    | Oldest commit saturation    | 0.25            | Same            |
-| ~:saturation-max~    | Newest commit saturation    | 0.60            | Same            |
+The gradient uses ease-out-cubic for perceptually linear colors:
 
-* Configuration Recipes
+#+begin_example
+f(x) = 1 - (1-x)³
 
-** By Use Case
+Makes newer commits more distinct:
+rank  linear  eased
+0     0.00 →  0.00  (newest: brightest)
+1     0.05 →  0.14  (big jump)
+2     0.10 →  0.27
+3     0.15 →  0.39
+...
+19    1.00 →  1.00  (oldest: dimmest)
+#+end_example
+
+** Configuration Recipes
 
 #+begin_src elisp
-;; 1. Smart Defaults (Recommended)
+;; 1. Smart defaults (recommended)
 (setq blame-reveal-recent-days-limit 'auto
       blame-reveal-gradient-quality 'auto)
-;; → 10-20 commits, ~90 days, good balance
 
-;; 2. Maximum Clarity (very active files)
+;; 2. Maximum clarity (very active files)
 (setq blame-reveal-recent-days-limit 'auto
       blame-reveal-gradient-quality 'strict)
-;; → 5-10 commits, ~30 days, excellent distinction
 
-;; 3. Maximum History (exploration)
+;; 3. Maximum history (exploration)
 (setq blame-reveal-recent-days-limit 'auto
       blame-reveal-gradient-quality 'relaxed)
-;; → 15-30 commits, ~180 days, more context
 
-;; 4. Fixed Window (predictable)
+;; 4. Fixed window (predictable)
 (setq blame-reveal-recent-days-limit 90)
-;; → All commits within 90 days
 
-;; 5. All Commits (IntelliJ IDEA style)
+;; 5. All commits (IntelliJ style)
 (setq blame-reveal-recent-days-limit nil)
-;; → All commits, relative coloring
 
-;; 6. Custom Colors (green, high contrast)
+;; 6. Green high-contrast
 (setq blame-reveal-color-scheme
       '(:hue 120
-        :dark-newest 0.75
-        :dark-oldest 0.30
-        :light-newest 0.35
-        :light-oldest 0.85
-        :saturation-min 0.35
-        :saturation-max 0.70))
+        :dark-newest 0.75 :dark-oldest 0.30
+        :light-newest 0.35 :light-oldest 0.85
+        :saturation-min 0.35 :saturation-max 0.70))
 #+end_src
 
 ** By File Activity
 
 #+begin_example
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Very Active (200 commits/year):
+  'auto + 'strict → 30 days, 8 commits
+  ████ ███▓ ██▓░ █▓░░ ▓░░░ ░░░░ ░░░░ ░░░░
 
-Very Active File (200 commits/year)
-────────────────────────────────────
-Recommendation: 'auto + 'strict
-Result: 30 days → 8 commits
-████ ███▓ ██▓░ █▓░░ ▓░░░ ░░░░ ░░░░ ░░░░  (rest gray)
+Moderate (50 commits/year):
+  'auto + 'auto → 180 days, 12 commits
+  ████ ███▓ ██▓░ █▓░░ ▓░░░ ... ░░░░
 
-
-Moderate File (50 commits/year)
-────────────────────────────────
-Recommendation: 'auto + 'auto
-Result: 180 days → 12 commits
-████ ███▓ ██▓░ █▓░░ ▓░░░ ... ░░░░  (rest gray)
-
-
-Quiet File (10 commits/year)
-────────────────────────────
-Recommendation: 'auto + 'relaxed
-Result: 365 days → 8 commits
-████ ███▓ ██▓░ █▓░░ ▓░░░ ░░░░ ░░░░ ░░░░  (rest gray)
+Quiet (10 commits/year):
+  'auto + 'relaxed → 365 days, 8 commits
+  ████ ███▓ ██▓░ █▓░░ ▓░░░ ░░░░ ░░░░ ░░░░
 #+end_example
 
-* Common Mistakes
-
-** ✗ Mistake: Setting both fixed days and gradient quality
+** Common Mistake
 
 #+begin_src elisp
-;; gradient-quality is IGNORED when using fixed days
-(setq blame-reveal-gradient-quality 'strict      ; ← No effect!
-      blame-reveal-recent-days-limit 30)         ; ← Only this is used
+;; ✗ WRONG: gradient-quality ignored with fixed days
+(setq blame-reveal-gradient-quality 'strict    ; ← No effect!
+      blame-reveal-recent-days-limit 30)       ; ← Only this used
+
+;; ✓ CORRECT: Choose one approach
+(setq blame-reveal-recent-days-limit 'auto     ; Let auto calculate
+      blame-reveal-gradient-quality 'strict)   ; With strict quality
+
+;; OR
+(setq blame-reveal-recent-days-limit 30)       ; Fixed 30 days
+;; (gradient-quality not needed)
 #+end_src
 
-/Why?/ ~gradient-quality~ only controls the /auto-calculation strategy/.
-When you specify a fixed number (30, 90, 180), there's no calculation to control.
-
-** ✓ Correct: Choose one approach
+** Debugging
 
 #+begin_src elisp
-;; Approach 1: Let auto mode calculate optimal window
-(setq blame-reveal-recent-days-limit 'auto
-      blame-reveal-gradient-quality 'strict)
-;; → Calculates ~20-40 days with excellent color distinction
+;; Show calculation details
+M-x blame-reveal-show-auto-calculation
 
-;; Approach 2: Use fixed window (gradient-quality not needed)
-(setq blame-reveal-recent-days-limit 30)
-;; → Always 30 days, shows all commits in that period
+;; Output:
+;; - Total commits: 156
+;; - Sample size: 15 commits
+;; - Sample span: 45.2 days
+;; - Calculated limit: 90 days
+;; - Commits in range: 18
+;; - Quality: Good (2.47% per commit)
+
+;; Force recalculation
+M-x blame-reveal-clear-auto-cache
 #+end_src
 
-** When to use which?
-
-| Choose Fixed Days (30, 90, 180) | Choose Auto + Quality |
-|--------------------------------+-----------------------|
-| Want predictable time window   | Want optimal colors   |
-| Know your team's rhythm        | Files vary in activity |
-| "Show me last month"           | "Show me ~10 commits" |
-
-#+begin_src elisp
-;; Example 1: Predictable window
-(setq blame-reveal-recent-days-limit 90)
-;; Active file: 50 commits in 90 days (colors may be subtle)
-;; Quiet file: 3 commits in 90 days (excellent distinction)
-
-;; Example 2: Consistent quality
-(setq blame-reveal-recent-days-limit 'auto
-      blame-reveal-gradient-quality 'strict)
-;; Active file: ~30 days, 8 commits (excellent distinction)
-;; Quiet file: ~180 days, 8 commits (excellent distinction)
-#+end_src
-* Decision Tree
+** Decision Tree
 
 #+begin_example
-Start: What's your priority?
-│
-├─► Simple & Smart
-│   └─► (setq blame-reveal-recent-days-limit 'auto
-│             blame-reveal-gradient-quality 'auto)
-│
-├─► Best Color Distinction
-│   └─► (setq blame-reveal-recent-days-limit 'auto
-│             blame-reveal-gradient-quality 'strict)
-│
-├─► More History
-│   ├─► Adaptive
-│   │   └─► (setq blame-reveal-recent-days-limit 'auto
-│   │             blame-reveal-gradient-quality 'relaxed)
-│   └─► Fixed
-│       └─► (setq blame-reveal-recent-days-limit 180)
-│
-├─► All Commits (like IntelliJ)
-│   └─► (setq blame-reveal-recent-days-limit nil)
-│
-└─► Custom Colors
-    └─► Modify blame-reveal-color-scheme
-        - Green:  '(:hue 120 ...)
-        - Purple: '(:hue 280 ...)
-        - High contrast: '(:dark-newest 0.75 :dark-oldest 0.30 ...)
+What's your priority?
+├─ Simple & smart     → 'auto + 'auto
+├─ Best distinction   → 'auto + 'strict
+├─ More history       → 'auto + 'relaxed or 180 (days)
+├─ All commits        → nil
+└─ Custom colors      → Modify :hue, :dark-newest, etc.
 #+end_example
 
-* Diagnostic Tool
+** Quick Reference
 
-Use ~M-x blame-reveal-show-auto-calculation~ to see how auto-calculation works:
-
-#+begin_example
-Auto calculation for current file:
-- Mode: Normal (HEAD)
-- Reference time: now
-- Total commits loaded: 156
-- Sample size: 15 commits
-- Sample time span: 45.2 days
-- Calculated limit: 90 days
-- Commits in range: 18
-- Gradient quality: Good (2.47% per commit)
-- Quality mode: auto
-#+end_example
-
-This helps you:
-1. Understand which commits are colored
-2. See the calculated time window
-3. Verify color distinction quality
-4. Decide if you need to adjust ~gradient-quality~
-
-* Quick Reference
-
-| Want                  | Setting                                              |
-|-----------------------+------------------------------------------------------|
-| Smart defaults        | ~'auto + 'auto~                                        |
-| Best clarity          | ~'auto + 'strict~                                      |
-| More history          | ~'auto + 'relaxed~ or ~180~ (days)                       |
-| All commits           | ~nil~                                                  |
-| Green colors          | ~:hue 120~                                             |
-| High contrast         | ~:dark-newest 0.75 :dark-oldest 0.30~                  |
-| Subtle colors         | ~:saturation-min 0.20 :saturation-max 0.45~            |
-#+end_src
+| Want               | Setting                                |
+|--------------------+----------------------------------------|
+| Smart defaults     | ~'auto + 'auto~                          |
+| Best clarity       | ~'auto + 'strict~                        |
+| More history       | ~'auto + 'relaxed~ or ~180~                |
+| All commits        | ~nil~                                    |
+| Green              | ~:hue 120~                               |
+| High contrast      | ~:dark-newest 0.75 :dark-oldest 0.30~    |
+| Debug              | ~M-x blame-reveal-show-auto-calculation~ |
