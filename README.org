@@ -117,7 +117,7 @@ M-x blame-reveal-mode
   (setq blame-reveal-gradient-quality 'auto)
 
   ;; Display
-  (setq blame-reveal-header-position 'before-block)
+  (setq blame-reveal-header-style 'block)
   (setq blame-reveal-show-uncommitted-fringe nil)  ; Use with diff-hl
 
   ;; Performance
@@ -176,12 +176,17 @@ Only applies when =recent-days-limit= is ='auto=:
 
 #+begin_src elisp
 ;; Header position
-(setq blame-reveal-header-position 'before-block)     ; Above first line
-(setq blame-reveal-header-position 'after-first-line) ; Inline
+(setq blame-reveal-header-style 'block)  ; Above first line
+(setq blame-reveal-header-style 'inline) ; Inline
+(setq blame-reveal-header-style 'margin) ; margin
 
 ;; Fringe side
-(setq blame-reveal-style 'left-fringe)   ; Left (default)
-(setq blame-reveal-style 'right-fringe)  ; Right
+(setq blame-reveal-fringe-side 'left-fringe)   ; Left (default)
+(setq blame-reveal-fringe-side 'right-fringe)  ; Right
+
+;; Margin side
+(setq blame-reveal-margin-side 'left)   ; Left (default)
+(setq blame-reveal-margin-side 'right)  ; Right
 
 ;; Uncommitted changes
 (setq blame-reveal-show-uncommitted-fringe nil)   ; Use diff-hl
