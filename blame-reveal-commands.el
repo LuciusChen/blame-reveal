@@ -304,5 +304,28 @@ The cache will be automatically rebuilt on next update."
     (blame-reveal--render-visible-region)
     (message "Auto-calculation cache cleared and recalculated")))
 
+(defun blame-reveal--auto-enable ()
+  "Automatically enable blame-reveal-mode if current buffer is appropriate.
+This function is called by `blame-reveal-global-mode' via `find-file-hook'.
+It checks if the buffer is a git-tracked file and enables blame-reveal-mode.
+Uses idle timer to avoid blocking file opening."
+  (when (and blame-reveal-global-mode
+             (buffer-file-name)
+             (not (minibufferp))
+             (not (string-prefix-p " " (buffer-name)))  ; Exclude temporary buffers
+             (not (string-prefix-p "*" (buffer-name)))) ; Exclude special buffers
+    ;; Delay git status check to avoid blocking file opening
+    (run-with-idle-timer
+     0.1 nil
+     (lambda (buf)
+       (when (and (buffer-live-p buf)
+                  (eq buf (current-buffer)))
+         (with-current-buffer buf
+           (when (and (buffer-file-name)
+                      (vc-git-registered (buffer-file-name))
+                      (not blame-reveal-mode))
+             (blame-reveal-mode 1)))))
+     (current-buffer))))
+
 (provide 'blame-reveal-commands)
 ;;; blame-reveal-commands.el ends here

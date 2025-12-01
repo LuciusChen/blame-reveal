@@ -694,5 +694,30 @@ For small files, sync loading is actually faster due to less overhead."
 
       (blame-reveal--remove-theme-advice))))
 
+;;; Global Mode
+
+;;;###autoload
+(define-minor-mode blame-reveal-global-mode
+  "Toggle automatic blame-reveal for all git-tracked files.
+
+When enabled, blame-reveal-mode will be automatically activated
+for any git-tracked file you open. This is convenient when working
+on a project and you want blame information always available.
+
+When disabled, you need to manually enable blame-reveal-mode for
+each file."
+  :global t
+  :group 'blame-reveal
+  (if blame-reveal-global-mode
+      (progn
+        (add-hook 'find-file-hook #'blame-reveal--auto-enable)
+        ;; Enable for already opened buffers
+        (dolist (buf (buffer-list))
+          (with-current-buffer buf
+            (blame-reveal--auto-enable)))
+        (message "Blame-reveal global mode enabled"))
+    (remove-hook 'find-file-hook #'blame-reveal--auto-enable)
+    (message "Blame-reveal global mode disabled")))
+
 (provide 'blame-reveal)
 ;;; blame-reveal.el ends here
