@@ -172,7 +172,8 @@ Example - Multi-line format with emphasis:
   :type 'function
   :group 'blame-reveal)
 
-(defcustom blame-reveal-inline-format-function nil
+(defcustom blame-reveal-inline-format-function
+  #'blame-reveal-format-inline-default
   "Function to format commit information for inline-style header.
 If nil, uses default compact format.
 
@@ -208,11 +209,11 @@ Example - Author and time only:
                        (blame-reveal--shorten-time date)))
          :faces (list =(:foreground ,color))
          :color color))))"
-  :type '(choice (const :tag "Default compact format" nil)
-                 (function :tag "Custom function"))
+  :type 'function
   :group 'blame-reveal)
 
-(defcustom blame-reveal-margin-format-function nil
+(defcustom blame-reveal-margin-format-function
+    #'blame-reveal-format-margin-default
   "Function to format commit information for margin-style header.
 If nil, uses default compact format (Author · Date).
 
@@ -247,8 +248,7 @@ Example - Author name only:
            :lines (list (substring short-name 0 (min 12 (length short-name))))
            :faces (list =(:foreground ,color :weight bold :height 0.9))
            :color color)))))"
-  :type '(choice (const :tag "Default (Author · Date)" nil)
-                 (function :tag "Custom function"))
+  :type 'function
   :group 'blame-reveal)
 
 ;;; Display Customization

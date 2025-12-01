@@ -57,28 +57,26 @@ Returns the configured side when in margin mode, nil otherwise."
     blame-reveal-margin-side))
 
 (defun blame-reveal--calculate-margin-width ()
-  "Calculate needed margin width based on content.
-Left and right margins use the same compact format (Author · Date)."
+  "Calculate needed margin width based on actual margin format function output."
   (if (not blame-reveal--commit-info)
       20  ; Default if no data yet
 
-    (let ((max-width 12))  ; Minimum width (e.g., "J Doe 5m")
-      ;; Calculate width based on Author · Date format
-      (maphash (lambda (_hash info)
+    (let ((max-width 12))  ; Minimum width
+      ;; Calculate width based on actual formatted output
+      (maphash (lambda (hash info)
                  (when info
-                   (let* ((author (nth 1 info))
-                          (date (nth 2 info))
-                          (abbrev-author (blame-reveal--abbreviate-author author))
-                          (short-date (blame-reveal--shorten-time date))
-                          ;; Width = author + space + separator + space + date
-                          (total-width (+ (length abbrev-author) 3 (length short-date))))
-                     (setq max-width (max max-width total-width)))))
+                   (let* ((color (blame-reveal--get-commit-color hash))
+                          ;; Get actual formatted display using custom function
+                          (display (blame-reveal--get-formatted-display hash 'margin))
+                          (formatted-text (car (blame-reveal-commit-display-lines display)))
+                          (actual-width (length formatted-text)))
+                     (setq max-width (max max-width actual-width)))))
                blame-reveal--commit-info)
 
       ;; Add padding and apply limit
       (let ((padding 2)
-            (max-allowed 25))  ; Same limit for both sides
-        (min (+ max-width padding) max-allowed)))))  ; Cap at 25 to avoid too wide margins
+            (max-allowed 90))
+        (min (+ max-width padding) max-allowed)))))  ; Cap at 90 to avoid too wide margins
 
 (defun blame-reveal--ensure-window-margins ()
   "Ensure window margins are set correctly for margin style.
