@@ -73,16 +73,6 @@
 (defvar blame-reveal-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "q") #'blame-reveal-mode)
-    (define-key map (kbd "c") #'blame-reveal-copy-commit-hash)
-    (define-key map (kbd "d") #'blame-reveal-show-commit-diff)
-    (define-key map (kbd "s") #'blame-reveal-show-commit-details)
-    (define-key map (kbd "h") #'blame-reveal-show-file-history)
-    (define-key map (kbd "l") #'blame-reveal-show-line-history)
-    (define-key map (kbd "b") #'blame-reveal-blame-recursively)
-    (define-key map (kbd "p") #'blame-reveal-blame-back)
-    (define-key map (kbd "^") #'blame-reveal-blame-back)
-    (define-key map (kbd "g") #'blame-reveal-blame-at-revision)
-    (define-key map (kbd "r") #'blame-reveal-reset-to-head)
     map)
   "Keymap for blame-reveal-mode.")
 

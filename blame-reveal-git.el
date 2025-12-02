@@ -398,6 +398,33 @@ Returns (SHORT-HASH AUTHOR DATE SUMMARY TIMESTAMP DESCRIPTION)."
             (setq description (string-trim (buffer-substring (point) (point-max)))))
           (list short-hash author date summary timestamp description))))))
 
+(defun blame-reveal--get-commits-info-batch (commit-hashes)
+  "Batch retrieve info for multiple COMMIT-HASHES.
+Returns alist of (COMMIT-HASH . INFO)."
+  (when commit-hashes
+    (with-temp-buffer
+      (let ((args (append (list "show" "--no-patch" "--no-walk"
+                                "--format=%H%x00%h%x00%an%x00%ar%x00%s%x00%at%x00%b%x01")
+                          commit-hashes)))
+        (when (zerop (apply #'call-process "git" nil t nil args))
+          (goto-char (point-min))
+          (let ((results nil)
+                (commits (split-string (buffer-string) "\001" t)))
+            (dolist (commit-str commits)
+              (let ((fields (split-string commit-str "\000" t)))
+                (when (>= (length fields) 6)
+                  (let ((full-hash (nth 0 fields))
+                        (short-hash (nth 1 fields))
+                        (author (nth 2 fields))
+                        (date (nth 3 fields))
+                        (summary (nth 4 fields))
+                        (timestamp (string-to-number (nth 5 fields)))
+                        (description (string-trim (or (nth 6 fields) ""))))
+                    (push (cons full-hash
+                                (list short-hash author date summary timestamp description))
+                          results)))))
+            (nreverse results)))))))
+
 (defun blame-reveal--ensure-commit-info (commit-hash)
   "Ensure commit info is loaded for COMMIT-HASH."
   (unless (or (blame-reveal--is-uncommitted-p commit-hash)
@@ -427,11 +454,28 @@ Returns (SHORT-HASH AUTHOR DATE SUMMARY TIMESTAMP DESCRIPTION)."
       (mapcar #'cadr visible-blocks))))
 
 (defun blame-reveal--ensure-visible-commits-loaded ()
-  "Ensure commit info is loaded for all visible commits."
+  "Ensure commit info is loaded for all visible commits (Optimized Batch Version)."
   (when-let ((visible-commits (blame-reveal--get-visible-commits)))
-    (dolist (commit visible-commits)
-      (blame-reveal--ensure-commit-info commit))
-    (blame-reveal--update-recent-commits)))
+    (let ((missing-commits
+           (cl-remove-if (lambda (h)
+                           (or (blame-reveal--is-uncommitted-p h)
+                               (gethash h blame-reveal--commit-info)))
+                         visible-commits)))
+      (when missing-commits
+        (let ((batch-results (blame-reveal--get-commits-info-batch missing-commits)))
+          (dolist (entry batch-results)
+            (let* ((hash (car entry))
+                   (info (cdr entry))
+                   (timestamp (nth 4 info)))
+              (puthash hash info blame-reveal--commit-info)
+              (when timestamp
+                (unless blame-reveal--timestamps
+                  (setq blame-reveal--timestamps (cons timestamp timestamp)))
+                (setcar blame-reveal--timestamps
+                        (min (car blame-reveal--timestamps) timestamp))
+                (setcdr blame-reveal--timestamps
+                        (max (cdr blame-reveal--timestamps) timestamp)))))))
+      (blame-reveal--update-recent-commits))))
 
 (defun blame-reveal--load-commits-incrementally ()
   "Load commit info for visible area only (lazy loading)."
