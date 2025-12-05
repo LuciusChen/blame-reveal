@@ -18,10 +18,11 @@ START-LINE and END-LINE specify optional line range.
 RELATIVE-FILE is the file path relative to git root."
   (let ((args (list "blame" "--porcelain")))
     (when blame-reveal--detect-moves
-      ;; 使用 -C -C 进行深度 copy 检测
-      ;; -M: 检测同文件内的移动
-      ;; -C: 检测同 commit 内跨文件的 copy
-      ;; -C -C: 检测任意 commit 的 copy（创建文件时）
+      ;; Git blame move/copy detection flags:
+      ;; -M:     Detect lines moved within the same file
+      ;; -C:     Detect lines copied from other files in the same commit
+      ;; -C -C:  Detect lines copied from any commit (expensive, checks file creation)
+      ;;         This can significantly slow down blame operations (5-10x for large repos)
       (setq args (append args '("-M" "-C" "-C"))))
     (when (and start-line end-line)
       (setq args (append args (list "-L" (format "%d,%d" start-line end-line)))))
@@ -33,16 +34,31 @@ RELATIVE-FILE is the file path relative to git root."
 
 ;;; Blame Data Parsing
 
+(defun blame-reveal--normalize-path (path git-root)
+  "Normalize PATH relative to GIT-ROOT, handling ./ and ../ correctly."
+  (when (and path git-root)
+    (file-relative-name (expand-file-name path git-root) git-root)))
+
+(defun blame-reveal--is-cross-file-p (file1 file2 git-root)
+  "Check if FILE1 and FILE2 are different files.
+Both should be relative to GIT-ROOT."
+  (and file1 file2
+       (not (string= (blame-reveal--normalize-path file1 git-root)
+                     (blame-reveal--normalize-path file2 git-root)))))
+
 (defun blame-reveal--parse-blame-output (output-buffer current-file)
   "Parse git blame porcelain output from OUTPUT-BUFFER.
 CURRENT-FILE is the file being blamed (relative to git root).
 Returns (BLAME-DATA . MOVE-METADATA) where:
 - BLAME-DATA is list of (LINE-NUMBER . COMMIT-HASH)
 - MOVE-METADATA is hash table of commit -> previous info"
-  (let ((blame-data nil)
-        (current-commit nil)
-        (current-line-filename nil)
-        (move-metadata (make-hash-table :test 'equal)))
+  (let* ((blame-data nil)
+         (current-commit nil)
+         (current-line-filename nil)
+         (move-metadata (make-hash-table :test 'equal))
+         (git-root (or (and (buffer-file-name)
+                            (vc-git-root (buffer-file-name)))
+                       default-directory)))
     (with-current-buffer output-buffer
       (goto-char (point-min))
       (while (not (eobp))
@@ -60,13 +76,9 @@ Returns (BLAME-DATA . MOVE-METADATA) where:
           (setq current-line-filename (match-string 1))
           ;; 如果 filename 与 current-file 不同，记录为 potential move/copy
           (when (and current-commit
-                     current-file
-                     current-line-filename
-                     (not (or (string= current-line-filename current-file)
-                              (string= current-line-filename
-                                       (file-name-nondirectory current-file))
-                              (string= (file-name-nondirectory current-line-filename)
-                                       (file-name-nondirectory current-file)))))
+                     (blame-reveal--is-cross-file-p current-line-filename
+                                                    current-file
+                                                    git-root))
             ;; 检查是否已经有 previous 字段设置的 metadata
             (unless (gethash current-commit move-metadata)
               ;; 没有 previous 字段（可能是 boundary commit）
@@ -211,7 +223,6 @@ Returns (BLAME-DATA . MOVE-METADATA) where:
                 (setq blame-reveal--all-commits-loaded nil)
                 (run-hook-with-args 'blame-reveal-after-load-hook (length blame-data))
                 (blame-reveal--state-transition 'rendering)
-                (blame-reveal--load-commits-incrementally)
                 (blame-reveal--render-visible-region)
                 (blame-reveal--state-complete))
             (blame-reveal--state-error "No git blame data available"))))
@@ -646,9 +657,9 @@ Returns alist of (COMMIT-HASH . INFO)."
   "Determine if async loading should be used based on configuration."
   (or blame-reveal--detect-moves
       (pcase blame-reveal-async-blame
-    ('auto (blame-reveal--should-lazy-load-p))
-    ('t t)
-    (_ nil))))
+        ('auto (blame-reveal--should-lazy-load-p))
+        ('t t)
+        (_ nil))))
 
 (provide 'blame-reveal-git)
 ;;; blame-reveal-git.el ends here

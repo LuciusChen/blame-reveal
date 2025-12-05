@@ -150,7 +150,7 @@ NAME like 'nf-PREFIX-ICONNAME'. COLOR sets :foreground; FALLBACK if unavailable.
     (replace-match "\\1 \\2" nil nil author))
    (t author)))
 
-(defun blame-reveal--get-move-copy-meta (commit-hash)
+(defun blame-reveal--get-move-copy-metadata (commit-hash)
   "Return plist (:previous-file ... :previous-commit ...)
 for COMMIT-HASH if moved/copied to a different file, else nil."
   (when (and blame-reveal--move-copy-metadata
@@ -175,7 +175,7 @@ Returns a cons cell (LINE . FACE) or nil."
          (line (format " %s %s · %s"
                        icon
                        prev-file
-                       (substring prev-commit 0 7)))
+                       (substring prev-commit 0 blame-reveal--short-hash-length)))
          (face `(:foreground ,color :height 0.9 :slant italic)))
     (cons line face)))
 
@@ -184,17 +184,17 @@ Returns a cons cell (LINE . FACE) or nil."
 Returns a string or nil."
   (let* ((prev-file (plist-get move-meta :previous-file))
          (prev-commit (plist-get move-meta :previous-commit))
-         (icon (blame-reveal--icon "nf-oct-file_moved" "⇝")))
+         (icon (blame-reveal--icon "nf-md-arrow_right_bottom" "󱞩")))
     (format " %s %s(%s)"
             icon
             (file-name-nondirectory prev-file)
-            (substring prev-commit 0 7))))
+            (substring prev-commit 0 blame-reveal--short-hash-length))))
 
 (defun blame-reveal--format-move-copy-for-margin (move-meta)
   "Format move/copy meta as an icon string for margin prefix.
 Returns a string (icon + space) or nil."
   (when move-meta
-    (format "%s " (blame-reveal--icon "nf-oct-file_moved" "⇝"))))
+    (format "%s " (blame-reveal--icon "nf-md-arrow_right_bottom" "󱞩"))))
 
 (defun blame-reveal-format-header-default (commit-hash commit-info color)
   "Default header formatter with abbreviated author names and move/copy info."
@@ -212,7 +212,7 @@ Returns a string (icon + space) or nil."
                                 icon abbrev-author summary short-date short-hash))
              (base-face `(:foreground ,color :weight bold))
              ;; 2. Move/Copy Line
-             (move-meta (blame-reveal--get-move-copy-meta commit-hash))
+             (move-meta (blame-reveal--get-move-copy-metadata commit-hash))
              (move-line-cons (when move-meta
                                (blame-reveal--format-move-copy-for-header move-meta color))))
 
@@ -238,7 +238,7 @@ Returns a string (icon + space) or nil."
              (abbrev-author (blame-reveal--abbreviate-author author))
              (base-text (format "%s%s · %s"
                                 icon abbrev-author summary))
-             (move-meta (blame-reveal--get-move-copy-meta commit-hash))
+             (move-meta (blame-reveal--get-move-copy-metadata commit-hash))
              (move-info (when move-meta
                           (blame-reveal--format-move-copy-for-inline move-meta)))
              (full-text (concat base-text (or move-info ""))))
@@ -260,7 +260,7 @@ Returns a string (icon + space) or nil."
              (short-date (blame-reveal--shorten-time date))
              (base-text (format "%s%s · %s"
                                 icon abbrev-author short-date))
-             (move-meta (blame-reveal--get-move-copy-meta commit-hash))
+             (move-meta (blame-reveal--get-move-copy-metadata commit-hash))
              (prefix (blame-reveal--format-move-copy-for-margin move-meta))
              (full-text (concat (or prefix "") base-text)))
         (make-blame-reveal-commit-display

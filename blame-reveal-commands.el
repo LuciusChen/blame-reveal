@@ -114,7 +114,7 @@ Uses magit if `blame-reveal-use-magit' is configured to do so."
             (let* ((color (blame-reveal--get-commit-color commit-hash))
                    (buffer-name (format "*Commit: %s*" summary))
                    (move-icon (blame-reveal--icon "nf-md-arrow_right_bottom" color "󱞩"))
-                   (move-meta (blame-reveal--get-move-copy-meta commit-hash))
+                   (move-meta (blame-reveal--get-move-copy-metadata commit-hash))
                    (prev-file (when move-meta (plist-get move-meta :previous-file)))
                    (prev-commit (when move-meta (plist-get move-meta :previous-commit))))
 
@@ -140,7 +140,7 @@ Uses magit if `blame-reveal-use-magit' is configured to do so."
                     (insert (propertize (format "%s %s · %s\n\n"
                                                 move-icon
                                                 prev-file
-                                                (substring prev-commit 0 7))
+                                                (substring prev-commit 0 blame-reveal--short-hash-length))
                                         'face `(:foreground ,color :slant italic :height 0.95))))
 
                   ;; Summary - 用 commit 色，加粗突出

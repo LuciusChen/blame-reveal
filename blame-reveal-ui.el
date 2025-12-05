@@ -276,48 +276,78 @@ Only recent commits are permanently visible."
 ;;; Event Handlers
 
 (defun blame-reveal--get-current-block ()
-  "Get the commit hash and start line of block at current line."
+  "Get the commit hash and start line of block at current line.
+Uses caching to avoid repeated searches within the same block."
   (let ((line-num (line-number-at-pos)))
-    ;; Try from overlays first (faster)
-    (or (cl-loop for ov in (overlays-at (point))
-                 for commit = (overlay-get ov 'blame-reveal-commit)
-                 when commit
-                 return (cl-loop for block in (blame-reveal--find-block-boundaries
-                                               blame-reveal--blame-data)
-                                 when (and (equal commit (nth 1 block))
-                                           (>= line-num (nth 0 block))
-                                           (< line-num (+ (nth 0 block) (nth 2 block))))
-                                 return (cons commit (nth 0 block))))
-        ;; Fallback: search in blame data
-        (cl-loop for block in (blame-reveal--find-block-boundaries
-                               blame-reveal--blame-data)
-                 when (and (>= line-num (nth 0 block))
-                           (< line-num (+ (nth 0 block) (nth 2 block))))
-                 return (cons (nth 1 block) (nth 0 block))))))
+    ;; 检查缓存是否有效
+    (if (and blame-reveal--current-line-cache
+             (let* ((cached-line (nth 0 blame-reveal--current-line-cache))
+                    (cached-commit (nth 1 blame-reveal--current-line-cache))
+                    (cached-start (nth 2 blame-reveal--current-line-cache)))
+               ;; 检查是否在缓存的 block 范围内
+               (when-let ((entry (assoc line-num blame-reveal--blame-data)))
+                 (equal (cdr entry) cached-commit))))
+        ;; 缓存命中，直接返回
+        (cons (nth 1 blame-reveal--current-line-cache)
+              (nth 2 blame-reveal--current-line-cache))
+
+      ;; 缓存未命中，重新查找
+      (let ((result
+             (or (cl-loop for ov in (overlays-at (point))
+                          for commit = (overlay-get ov 'blame-reveal-commit)
+                          when commit
+                          return (cl-loop for block in (blame-reveal--find-block-boundaries
+                                                        blame-reveal--blame-data)
+                                          when (and (equal commit (nth 1 block))
+                                                    (>= line-num (nth 0 block))
+                                                    (< line-num (+ (nth 0 block) (nth 2 block))))
+                                          return (cons commit (nth 0 block))))
+                 ;; Fallback
+                 (cl-loop for block in (blame-reveal--find-block-boundaries
+                                        blame-reveal--blame-data)
+                          when (and (>= line-num (nth 0 block))
+                                    (< line-num (+ (nth 0 block) (nth 2 block))))
+                          return (cons (nth 1 block) (nth 0 block))))))
+        ;; 更新缓存
+        (when result
+          (setq blame-reveal--current-line-cache
+                (list line-num (car result) (cdr result))))
+        result))))
 
 (defun blame-reveal--update-header ()
   "Update header display based on cursor position.
-Delays rendering until cursor movement stops."
-  (let ((current-block (blame-reveal--get-current-block)))
+Throttles updates to avoid excessive calls during rapid cursor movement."
+  (let* ((current-line (line-number-at-pos))
+         (current-block (blame-reveal--get-current-block)))
     (when current-block
       (let ((commit-hash (car current-block)))
-        ;; Clear overlay of previous block when entering new block
+        ;; 只在切换 block 时清理旧 overlay
         (when (and blame-reveal--last-rendered-commit
                    (not (equal blame-reveal--last-rendered-commit commit-hash)))
           (blame-reveal--clear-temp-overlays-for-commit
            blame-reveal--last-rendered-commit)
           (setq blame-reveal--last-rendered-commit nil))
-        ;; Update current block marker
-        (setq blame-reveal--current-block-commit commit-hash))))
-  ;; Cancel previous timer
-  (when blame-reveal--header-update-timer
-    (cancel-timer blame-reveal--header-update-timer)
-    (setq blame-reveal--header-update-timer nil))
-  ;; Set new timer for rendering
-  (setq blame-reveal--header-update-timer
-        (run-with-idle-timer
-         blame-reveal--scroll-render-delay nil
-         #'blame-reveal--update-header-impl)))
+
+        ;; 更新当前 block 标记
+        (setq blame-reveal--current-block-commit commit-hash)
+
+        ;; 节流：如果在同一行或同一 commit block，跳过更新
+        (when (or (not blame-reveal--last-update-line)
+                  (not (equal blame-reveal--last-update-line current-line))
+                  (not (equal blame-reveal--last-rendered-commit commit-hash)))
+
+          ;; 取消之前的 timer
+          (when blame-reveal--header-update-timer
+            (cancel-timer blame-reveal--header-update-timer)
+            (setq blame-reveal--header-update-timer nil))
+
+          ;; 设置新 timer
+          (setq blame-reveal--header-update-timer
+                (run-with-idle-timer
+                 blame-reveal--scroll-render-delay nil
+                 (lambda ()
+                   (setq blame-reveal--last-update-line current-line)
+                   (blame-reveal--update-header-impl)))))))))
 
 (defun blame-reveal--update-header-impl ()
   "Implementation of header update (using unified header system)."

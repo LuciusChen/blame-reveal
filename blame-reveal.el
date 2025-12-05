@@ -677,6 +677,7 @@ Handles Hooks, Timers, Overlays, and State."
         blame-reveal--blame-data-range nil
         blame-reveal--all-commits-loaded nil
         blame-reveal--detect-moves nil
+        blame-reveal--current-line-cache nil
         blame-reveal--move-copy-metadata nil
         blame-reveal--blame-stack nil
         blame-reveal--current-revision nil

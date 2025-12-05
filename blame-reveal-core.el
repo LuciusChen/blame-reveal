@@ -24,6 +24,9 @@
   '(fringe header sticky-header temp-fringe loading)
   "All overlay types used by blame-reveal.")
 
+(defconst blame-reveal--short-hash-length 7
+  "Length of abbreviated commit hash for display.")
+
 ;;; Data Structures
 
 (cl-defstruct blame-reveal-commit-display
@@ -87,6 +90,9 @@ Set by interactive command, not a persistent option.")
   "Hash table storing move/copy metadata for commits.
 Maps commit-hash to plist with :previous-commit and :previous-file.")
 
+(defvar-local blame-reveal--last-update-line nil
+  "Last line number where header was updated.")
+
 ;;; Process Tracking (for concurrency safety)
 
 (defvar-local blame-reveal--process-id nil
@@ -129,6 +135,9 @@ Cache is invalidated when commit count changes significantly.")
 
 (defvar-local blame-reveal--all-commits-loaded nil
   "Flag indicating if all commits info has been loaded.")
+
+(defvar-local blame-reveal--current-line-cache nil
+  "Cache for current line's block info: (line-num commit-hash block-start).")
 
 ;;; State Machine Variables
 
