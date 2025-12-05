@@ -254,11 +254,11 @@
                     (when (buffer-live-p buf)
                       (with-current-buffer buf
                         (when blame-reveal-mode
-                          ;; 清除旧 header
+                          ;; clean old header
                           (when blame-reveal--header-overlay
                             (delete-overlay blame-reveal--header-overlay)
                             (setq blame-reveal--header-overlay nil))
-                          ;; 触发重新渲染
+                          ;; Trigger re-render
                           (setq blame-reveal--current-block-commit nil)
                           (blame-reveal--update-header)))))
                   (current-buffer))
@@ -373,8 +373,6 @@
           (plist-put (copy-sequence blame-reveal-color-scheme) :saturation-max new))
     (when blame-reveal-mode
       (blame-reveal--recolor-and-render))))
-
-;;; 改进后的子菜单
 
 (transient-define-prefix blame-reveal-color-scheme-menu ()
   "Configure color scheme."
@@ -520,43 +518,6 @@
 
 ;;; Main Transient Menu
 
-;;;###autoload (autoload 'blame-reveal-menu "blame-reveal-transient" nil t)
-;; (transient-define-prefix blame-reveal-menu ()
-;;   "Transient menu for blame-reveal configuration and commands."
-;;   [:description blame-reveal--menu-title
-;;    ["Display"
-;;     ("=" blame-reveal--toggle-scope)
-;;     (blame-reveal--infix-header-style)
-;;     (blame-reveal--infix-fringe-side)
-;;     (blame-reveal--infix-margin-side)]
-;;    ["Colors"
-;;     (blame-reveal--infix-days-limit)
-;;     (blame-reveal--infix-gradient-quality)
-;;     (blame-reveal--infix-color-hue)]
-;;    ["Options"
-;;     (blame-reveal--infix-show-uncommitted-fringe)
-;;     (blame-reveal--infix-lazy-threshold)
-;;     (blame-reveal--infix-async-blame)]]
-;;   [["Navigation"
-;;     :pad-keys t
-;;     ("b" "Blame recursively" blame-reveal-blame-recursively :transient t)
-;;     ("p" "Blame back" blame-reveal-blame-back :transient t)
-;;     ("g" "Blame at revision" blame-reveal-blame-at-revision)
-;;     ("r" "Reset to HEAD" blame-reveal-reset-to-head :transient t)]
-;;    ["Inspect"
-;;     :pad-keys t
-;;     ("c" "Copy hash" blame-reveal-copy-commit-hash)
-;;     ("v" "Show diff" blame-reveal-show-commit-diff)
-;;     ("d" "Show details" blame-reveal-show-commit-details)
-;;     ("h" "File history" blame-reveal-show-file-history)
-;;     ("l" "Line history" blame-reveal-show-line-history)]
-;;    ["Actions"
-;;     :pad-keys t
-;;     ("R" "Refresh" blame-reveal--full-update :transient t)
-;;     ("P" "Presets" blame-reveal-presets :transient t)
-;;     ("?" "Auto calc" blame-reveal-show-auto-calculation)
-;;     ("C" "Clear cache" blame-reveal-clear-auto-cache :transient t)
-;;     ("q" "Quit" transient-quit-one)]])
 (transient-define-prefix blame-reveal-menu ()
   "Transient menu for blame-reveal configuration."
   [:description blame-reveal--menu-title
@@ -588,8 +549,8 @@
 (defun blame-reveal-transient-setup-keys ()
   "Setup recommended keybindings for blame-reveal transient menu."
   (when (boundp 'blame-reveal-mode-map)
-    (define-key blame-reveal-mode-map (kbd "C-c b m") #'blame-reveal-menu)
-    (define-key blame-reveal-mode-map (kbd "C-c b p") #'blame-reveal-presets)))
+    (define-key blame-reveal-mode-map (kbd "C-c e m") #'blame-reveal-menu)
+    (define-key blame-reveal-mode-map (kbd "C-c e p") #'blame-reveal-presets)))
 
 (provide 'blame-reveal-transient)
 ;;; blame-reveal-transient.el ends here

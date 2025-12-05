@@ -168,8 +168,8 @@ Returns (BLAME-DATA . MOVE-METADATA) where:
                                    relative-file))
               (let ((result (blame-reveal--parse-blame-output
                              (current-buffer)
-                             relative-file)))  ; 传入 relative-file
-                ;; 合并 metadata（如果已有的话）
+                             relative-file)))
+                ;; Merge metadata
                 (when (and (cdr result)
                            (hash-table-p (cdr result))
                            (> (hash-table-count (cdr result)) 0))
@@ -178,7 +178,6 @@ Returns (BLAME-DATA . MOVE-METADATA) where:
                   (maphash (lambda (k v)
                              (puthash k v blame-reveal--move-copy-metadata))
                            (cdr result)))
-                ;; 返回完整 result
                 result)
             nil))))))
 
@@ -245,7 +244,7 @@ Returns (BLAME-DATA . MOVE-METADATA) where:
               (message "No new blame data in range %d-%d" start-line end-line)
               (blame-reveal--state-complete))
           (blame-reveal--state-transition 'processing)
-          ;; 合并 metadata
+          ;; Merge metadata
           (when (and (hash-table-p move-metadata)
                      (> (hash-table-count move-metadata) 0))
             (unless (hash-table-p blame-reveal--move-copy-metadata)
@@ -405,7 +404,7 @@ Returns (BLAME-DATA . MOVE-METADATA) where:
                       (setq blame-reveal--timestamps nil)
                       (setq blame-reveal--recent-commits nil)
                       (setq blame-reveal--all-commits-loaded nil)
-                      ;; 保存 metadata
+                      ;; Save metadata
                       (when (hash-table-p move-metadata)
                         (setq blame-reveal--move-copy-metadata move-metadata)
                         (when (> (hash-table-count move-metadata) 0)

@@ -614,36 +614,29 @@ Returns t if valid, otherwise prints message and returns nil."
 
 (defun blame-reveal--setup-buffer-resources ()
   "Initialize all resources, hooks, and state for the current buffer."
-
-  ;; 1. Keymap & Emulation (优先处理键位绑定)
+  ;; 1. Keymap & Emulation
   (setq blame-reveal--emulation-alist
         `((blame-reveal-mode . ,blame-reveal-mode-map)))
   (add-to-list 'emulation-mode-map-alists 'blame-reveal--emulation-alist)
-
-  ;; 2. Subsystems Init (初始化子系统)
+  ;; 2. Subsystems Init
   (blame-reveal--init-overlay-registry)
   (blame-reveal--init-color-strategy)
-
-  ;; 3. State & Cache Reset (重置状态)
+  ;; 3. State & Cache Reset
   (setq blame-reveal--auto-days-cache nil
         blame-reveal--blame-data-range nil
         blame-reveal--all-commits-loaded nil)
-
-  ;; 初始化 hash table
+  ;; Initializing hash table
   (unless (hash-table-p blame-reveal--move-copy-metadata)
     (setq blame-reveal--move-copy-metadata (make-hash-table :test 'equal)))
-
-  ;; 4. UI Setup (UI 设置)
+  ;; 4. UI Setup
   (blame-reveal--setup-mode-line)
   (blame-reveal--setup-theme-advice)
-
-  ;; 5. Hooks (绑定事件)
+  ;; 5. Hooks
   (add-hook 'after-save-hook #'blame-reveal--full-update nil t)
   (add-hook 'window-scroll-functions #'blame-reveal--scroll-handler nil t)
   (add-hook 'post-command-hook #'blame-reveal--update-header nil t)
   (add-hook 'window-configuration-change-hook #'blame-reveal--render-visible-region nil t)
-
-  ;; 6. Trigger Loading (最后一步：开始加载数据)
+  ;; 6. Trigger Loading
   (blame-reveal--load-blame-data))
 
 (defun blame-reveal--cleanup-buffer-resources ()
@@ -698,7 +691,7 @@ Handles Hooks, Timers, Overlays, and State."
             (blame-reveal--setup-buffer-resources)
             (run-hooks 'blame-reveal-mode-on-hook))
 
-        ;; 如果检查失败，强制关闭 mode (避免 mode 变量为 t 但实际没跑起来)
+        ;; If the check fails, forcibly disable the mode
         (setq blame-reveal-mode nil))
 
     ;; --- Disable Phase ---

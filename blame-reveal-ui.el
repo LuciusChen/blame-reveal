@@ -279,19 +279,19 @@ Only recent commits are permanently visible."
   "Get the commit hash and start line of block at current line.
 Uses caching to avoid repeated searches within the same block."
   (let ((line-num (line-number-at-pos)))
-    ;; 检查缓存是否有效
+    ;; Check if the cache is valid
     (if (and blame-reveal--current-line-cache
              (let* ((cached-line (nth 0 blame-reveal--current-line-cache))
                     (cached-commit (nth 1 blame-reveal--current-line-cache))
                     (cached-start (nth 2 blame-reveal--current-line-cache)))
-               ;; 检查是否在缓存的 block 范围内
+               ;; Check if within the cached block range
                (when-let ((entry (assoc line-num blame-reveal--blame-data)))
                  (equal (cdr entry) cached-commit))))
-        ;; 缓存命中，直接返回
+        ;; Cache hit, return directly.
         (cons (nth 1 blame-reveal--current-line-cache)
               (nth 2 blame-reveal--current-line-cache))
 
-      ;; 缓存未命中，重新查找
+      ;; Cache miss, reinitiate search.
       (let ((result
              (or (cl-loop for ov in (overlays-at (point))
                           for commit = (overlay-get ov 'blame-reveal-commit)
@@ -308,7 +308,7 @@ Uses caching to avoid repeated searches within the same block."
                           when (and (>= line-num (nth 0 block))
                                     (< line-num (+ (nth 0 block) (nth 2 block))))
                           return (cons (nth 1 block) (nth 0 block))))))
-        ;; 更新缓存
+        ;; Update cache
         (when result
           (setq blame-reveal--current-line-cache
                 (list line-num (car result) (cdr result))))
@@ -321,27 +321,24 @@ Throttles updates to avoid excessive calls during rapid cursor movement."
          (current-block (blame-reveal--get-current-block)))
     (when current-block
       (let ((commit-hash (car current-block)))
-        ;; 只在切换 block 时清理旧 overlay
+        ;; Only clear the old overlay when switching blocks.
         (when (and blame-reveal--last-rendered-commit
                    (not (equal blame-reveal--last-rendered-commit commit-hash)))
           (blame-reveal--clear-temp-overlays-for-commit
            blame-reveal--last-rendered-commit)
           (setq blame-reveal--last-rendered-commit nil))
-
-        ;; 更新当前 block 标记
+        ;; Update current block marker
         (setq blame-reveal--current-block-commit commit-hash)
 
-        ;; 节流：如果在同一行或同一 commit block，跳过更新
+        ;; Throttle: Skip updates if they are in the same line or the same commit block.
         (when (or (not blame-reveal--last-update-line)
                   (not (equal blame-reveal--last-update-line current-line))
                   (not (equal blame-reveal--last-rendered-commit commit-hash)))
 
-          ;; 取消之前的 timer
           (when blame-reveal--header-update-timer
             (cancel-timer blame-reveal--header-update-timer)
             (setq blame-reveal--header-update-timer nil))
 
-          ;; 设置新 timer
           (setq blame-reveal--header-update-timer
                 (run-with-idle-timer
                  blame-reveal--scroll-render-delay nil
@@ -525,14 +522,11 @@ Recalculates colors and refreshes all displays."
 (defun blame-reveal--cleanup-operation-ui-artifacts ()
   "Cleanup UI elements and timers directly related to an active operation.
 Used for immediate aborts (error or cancel)."
-
   (blame-reveal--stop-loading-animation)
 
-  ;; 1. 清理 Timers
   (blame-reveal--safe-cancel-timer 'blame-reveal--temp-overlay-timer)
   (blame-reveal--safe-cancel-timer 'blame-reveal--header-update-timer)
 
-  ;; 2. 清理 Header Overlays
   (ignore-errors
     (when (bound-and-true-p blame-reveal--header-overlay)
       (delete-overlay blame-reveal--header-overlay)
@@ -543,23 +537,20 @@ Used for immediate aborts (error or cancel)."
 (defun blame-reveal--full-update ()
   "Full update: reload blame data and render visible region."
   (interactive)
-  ;; 强制取消当前操作并清理
+  ;; Forcefully cancel the current operation and clean up
   (when (blame-reveal--state-is-busy-p)
     (message "[Update] Cancelling current operation...")
-
-    ;; **UI 清理 (留在 UI 层)**
+    ;; UI Cleanup
     (blame-reveal--stop-loading-animation)
-
-    ;; **状态清理 (委托给 State 层)**
+    ;; State Cleanup
     (blame-reveal--state-cancel "full update requested"))
-
-  ;; 短暂延迟，确保清理完成
+  ;; A brief delay to ensure cleanup is completed.
   (run-with-timer
    0.1 nil
    (lambda (buf)
      (when (buffer-live-p buf)
        (with-current-buffer buf
-         ;; Reset buffer-specific data (这些数据是独立于 state 进程的)
+         ;; Reset buffer-specific data
          (setq blame-reveal--blame-data nil
                blame-reveal--blame-data-range nil
                blame-reveal--commit-info nil

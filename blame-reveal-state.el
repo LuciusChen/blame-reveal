@@ -39,12 +39,12 @@ Returns t if started successfully."
         (progn
           (when (not (eq blame-reveal--state-status 'idle))
             (blame-reveal--state-cancel reason))
-          ;; 重要：在生成新 ID 之前，确保旧进程已经清理
+          ;; Important: Ensure that the old process has been cleaned up before generating a new ID.
           (when blame-reveal--state-process
             (when (process-live-p blame-reveal--state-process)
               (delete-process blame-reveal--state-process))
             (setq blame-reveal--state-process nil))
-          ;; 生成新的进程 ID
+          ;; Generate a new process ID
           (setq blame-reveal--process-id (blame-reveal--generate-process-id))
           (setq blame-reveal--state-status 'loading
                 blame-reveal--state-operation operation
@@ -61,10 +61,10 @@ Returns t if started successfully."
 
 (defun blame-reveal--state-set-async-resources (process buffer)
   "Set async PROCESS and BUFFER for current operation."
-  ;; 确保有进程 ID
+  ;; Ensure there is a process ID
   (unless blame-reveal--process-id
     (setq blame-reveal--process-id (blame-reveal--generate-process-id)))
-  ;; 存储进程 ID 到进程对象
+  ;; Store process ID to the process object.
   (when (and process (processp process))
     (process-put process 'blame-reveal-process-id blame-reveal--process-id)
     (process-put process 'source-file (buffer-file-name)))
@@ -74,7 +74,7 @@ Returns t if started successfully."
 (defun blame-reveal--state-verify-process (process)
   "Verify PROCESS belongs to current operation."
   (and (processp process)
-       ;; 关键：如果进程已经不在 state-process 中，说明已被替换
+       ;; If the process is no longer in state-process, it means it has been replaced.
        (eq process blame-reveal--state-process)
        (let ((proc-id (process-get process 'blame-reveal-process-id))
              (proc-file (process-get process 'source-file)))
@@ -119,7 +119,7 @@ Ensures cleanup happens even if rendering fails."
 (defun blame-reveal--state-reset-internal ()
   "Reset all internal state variables and async resources (process/buffer).
 DOES NOT handle UI elements or application timers."
-  ;; 保持 loading animation 停止，因为它与 'loading 状态紧密相关
+  ;; Keep the loading animation stopped
   (ignore-errors (blame-reveal--stop-loading-animation))
 
   (blame-reveal--state-cleanup-async)
@@ -133,17 +133,11 @@ DOES NOT handle UI elements or application timers."
 (defun blame-reveal--state-error (error-msg)
   "Handle error with ERROR-MSG. Performs emergency UI cleanup defensively."
   (message "[State] Error: %s" error-msg)
-
-  ;; **紧急UI清理**：这是防御性编程，防止异步错误导致UI残留。
-  ;; 我们假设这个函数存在于 load-path 中，并且它不依赖 state.el。
   (ignore-errors
     (when (fboundp 'blame-reveal--cleanup-operation-ui-artifacts)
       (blame-reveal--cleanup-operation-ui-artifacts)))
 
-  ;; 执行核心状态重置
   (blame-reveal--state-reset-internal)
-
-  ;; 设置错误状态并在短暂延迟后恢复 idle (原逻辑)
   (setq blame-reveal--state-status 'error)
   (run-with-timer 0.1 nil
                   (lambda ()

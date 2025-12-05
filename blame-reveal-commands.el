@@ -121,8 +121,7 @@ Uses magit if `blame-reveal-use-magit' is configured to do so."
               (with-current-buffer (get-buffer-create buffer-name)
                 (let ((inhibit-read-only t))
                   (erase-buffer)
-
-                  ;; Commit info - 标签用默认色，内容用 commit 色
+                  ;; Commit info
                   (insert "Commit: ")
                   (insert (propertize short-hash 'face `(:foreground ,color :weight bold)))
                   (insert "\n")
@@ -134,20 +133,17 @@ Uses magit if `blame-reveal-use-magit' is configured to do so."
                   (insert "Date:   ")
                   (insert (propertize date 'face `(:foreground ,color)))
                   (insert "\n\n")
-
-                  ;; Move/Copy info - 图标和内容都用 commit 色，稍淡
+                  ;; Move/Copy info
                   (when (and prev-file prev-commit)
                     (insert (propertize (format "%s %s · %s\n\n"
                                                 move-icon
                                                 prev-file
                                                 (substring prev-commit 0 blame-reveal--short-hash-length))
                                         'face `(:foreground ,color :slant italic :height 0.95))))
-
-                  ;; Summary - 用 commit 色，加粗突出
+                  ;; Summary
                   (insert (propertize summary 'face `(:foreground ,color :weight bold)))
                   (insert "\n\n")
-
-                  ;; Description - 用默认色，降低视觉权重
+                  ;; Description
                   (when (and description (not (string-empty-p description)))
                     (insert description))
 
