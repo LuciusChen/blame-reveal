@@ -95,45 +95,67 @@ Uses magit if `blame-reveal-use-magit' is configured to do so."
 
 ;;;###autoload
 (defun blame-reveal-show-commit-details ()
-  "Show full commit details including description in a separate buffer."
+  "Show detailed information about commit at current line in a popup buffer."
   (interactive)
-  (if-let* ((current-block (blame-reveal--get-current-block))
-            (commit-hash (car current-block))
-            (info (gethash commit-hash blame-reveal--commit-info)))
-      (let* ((short-hash (nth 0 info))
-             (author (nth 1 info))
-             (date (nth 2 info))
-             (summary (nth 3 info))
-             (description (nth 5 info))
-             (desc-trimmed (if description (string-trim description) ""))
-             (buffer-name "*Commit Details*")
-             (buffer (get-buffer-create buffer-name)))
-        (with-current-buffer buffer
-          (let ((inhibit-read-only t))
-            (erase-buffer)
-            (insert (propertize (format "%s\n" summary)
-                                'face '(:height 1.1 :weight bold)))
-            (insert (propertize short-hash 'face '(:foreground "#6c9ef8" :weight bold)))
-            (insert (propertize " • " 'face '(:foreground "#666")))
-            (insert (propertize author 'face '(:foreground "#a0a0a0")))
-            (insert (propertize " • " 'face '(:foreground "#666")))
-            (insert (propertize date 'face '(:foreground "#a0a0a0")))
-            (insert "\n")
-            (insert (propertize (make-string 60 ?─) 'face '(:foreground "#444")))
-            (insert "\n\n")
-            (if (and desc-trimmed (not (string-empty-p desc-trimmed)))
-                (let ((desc-lines (split-string desc-trimmed "\n")))
-                  (dolist (line desc-lines)
-                    (insert (propertize (format "%s\n" line)
-                                        'face '(:foreground "#d0d0d0")))))
-              (insert (propertize "(no description)"
-                                  'face '(:foreground "#666" :slant italic))))
-            (insert "\n")
-            (goto-char (point-min)))
-          (special-mode)
-          (local-set-key (kbd "q") 'quit-window))
-        (pop-to-buffer buffer))
-    (message "No commit info at current line")))
+  (unless blame-reveal-mode
+    (user-error "blame-reveal-mode is not enabled"))
+  (let* ((current-block (blame-reveal--get-current-block))
+         (commit-hash (car current-block)))
+    (unless commit-hash
+      (user-error "No commit at current line"))
+    (if (blame-reveal--is-uncommitted-p commit-hash)
+        (message "Uncommitted changes")
+      (let ((info (gethash commit-hash blame-reveal--commit-info)))
+        (unless info
+          (blame-reveal--ensure-commit-info commit-hash)
+          (setq info (gethash commit-hash blame-reveal--commit-info)))
+        (when info
+          (pcase-let ((`(,short-hash ,author ,date ,summary ,_timestamp ,description) info))
+            (let* ((color (blame-reveal--get-commit-color commit-hash))
+                   (buffer-name (format "*Commit: %s*" summary))
+                   (move-icon (blame-reveal--icon "nf-md-arrow_right_bottom" color "󱞩"))
+                   (move-meta (blame-reveal--get-move-copy-meta commit-hash))
+                   (prev-file (when move-meta (plist-get move-meta :previous-file)))
+                   (prev-commit (when move-meta (plist-get move-meta :previous-commit))))
+
+              (with-current-buffer (get-buffer-create buffer-name)
+                (let ((inhibit-read-only t))
+                  (erase-buffer)
+
+                  ;; Commit info - 标签用默认色，内容用 commit 色
+                  (insert "Commit: ")
+                  (insert (propertize short-hash 'face `(:foreground ,color :weight bold)))
+                  (insert "\n")
+
+                  (insert "Author: ")
+                  (insert (propertize author 'face `(:foreground ,color)))
+                  (insert "\n")
+
+                  (insert "Date:   ")
+                  (insert (propertize date 'face `(:foreground ,color)))
+                  (insert "\n\n")
+
+                  ;; Move/Copy info - 图标和内容都用 commit 色，稍淡
+                  (when (and prev-file prev-commit)
+                    (insert (propertize (format "%s %s · %s\n\n"
+                                                move-icon
+                                                prev-file
+                                                (substring prev-commit 0 7))
+                                        'face `(:foreground ,color :slant italic :height 0.95))))
+
+                  ;; Summary - 用 commit 色，加粗突出
+                  (insert (propertize summary 'face `(:foreground ,color :weight bold)))
+                  (insert "\n\n")
+
+                  ;; Description - 用默认色，降低视觉权重
+                  (when (and description (not (string-empty-p description)))
+                    (insert description))
+
+                  (goto-char (point-min))
+                  (view-mode 1)
+                  (setq buffer-read-only t))
+
+                (pop-to-buffer (current-buffer))))))))))
 
 ;;;###autoload
 (defun blame-reveal-show-file-history ()

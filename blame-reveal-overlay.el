@@ -296,7 +296,7 @@ Only renders in visible range."
   "Print overlay statistics (for debugging)."
   (interactive)
   (let ((stats (blame-reveal--overlay-stats)))
-    (message "Overlay stats: %s" 
+    (message "Overlay stats: %s"
              (mapconcat (lambda (type)
                           (format "%s=%d" type (plist-get stats type)))
                         (cons :total blame-reveal--overlay-types)

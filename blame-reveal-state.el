@@ -116,81 +116,44 @@ Ensures cleanup happens even if rendering fails."
           blame-reveal--process-id nil))
   (message "[State] Complete"))
 
-(defun blame-reveal--state-error (error-msg)
-  "Handle error with ERROR-MSG.
-Ensures all resources are cleaned up even if cleanup fails.
-Uses defensive programming to prevent cascading failures."
-  (message "[State] Error: %s" error-msg)
+(defun blame-reveal--state-reset-internal ()
+  "Reset all internal state variables and async resources (process/buffer).
+DOES NOT handle UI elements or application timers."
+  ;; 保持 loading animation 停止，因为它与 'loading 状态紧密相关
+  (ignore-errors (blame-reveal--stop-loading-animation))
 
-  ;; 第一层：清理异步资源
-  (ignore-errors
-    (blame-reveal--stop-loading-animation))
-  (ignore-errors
-    (blame-reveal--state-cleanup-async))
+  (blame-reveal--state-cleanup-async)
 
-  ;; 第二层：清理 UI 元素
-  (ignore-errors
-    (when (and (boundp 'blame-reveal--header-overlay)
-               blame-reveal--header-overlay
-               (overlayp blame-reveal--header-overlay))
-      (delete-overlay blame-reveal--header-overlay)
-      (setq blame-reveal--header-overlay nil)))
-
-  (ignore-errors
-    (when (fboundp 'blame-reveal--clear-sticky-header)
-      (blame-reveal--clear-sticky-header)))
-
-  ;; 第三层：清理定时器
-  (ignore-errors
-    (when (and (boundp 'blame-reveal--temp-overlay-timer)
-               blame-reveal--temp-overlay-timer
-               (timerp blame-reveal--temp-overlay-timer))
-      (cancel-timer blame-reveal--temp-overlay-timer)
-      (setq blame-reveal--temp-overlay-timer nil)))
-
-  (ignore-errors
-    (when (and (boundp 'blame-reveal--header-update-timer)
-               blame-reveal--header-update-timer
-               (timerp blame-reveal--header-update-timer))
-      (cancel-timer blame-reveal--header-update-timer)
-      (setq blame-reveal--header-update-timer nil)))
-
-  ;; 设置错误状态
-  (setq blame-reveal--state-status 'error)
-
-  ;; 延迟重置状态（给用户时间看到错误）
-  (run-with-timer 0.1 nil
-                  (lambda ()
-                    (when (and (boundp 'blame-reveal--state-status)
-                               (eq blame-reveal--state-status 'error))
-                      (setq blame-reveal--state-status 'idle
-                            blame-reveal--state-operation nil
-                            blame-reveal--state-mode nil
-                            blame-reveal--state-metadata nil
-                            blame-reveal--process-id nil)))))
-
-(defun blame-reveal--state-cancel (reason)
-  "Cancel current operation for REASON.
-Ensures all resources are cleaned up."
-  (message "[State] Cancel: %s" reason)
-  (unwind-protect
-      (progn
-        (blame-reveal--stop-loading-animation)
-        (blame-reveal--state-cleanup-async))
-    ;; Ensure cleanup even if errors occur
-    (ignore-errors
-      (when blame-reveal--header-overlay
-        (delete-overlay blame-reveal--header-overlay)
-        (setq blame-reveal--header-overlay nil))
-      (blame-reveal--clear-sticky-header)
-      (when blame-reveal--temp-overlay-timer
-        (cancel-timer blame-reveal--temp-overlay-timer)
-        (setq blame-reveal--temp-overlay-timer nil))))
   (setq blame-reveal--state-status 'idle
         blame-reveal--state-operation nil
         blame-reveal--state-mode nil
         blame-reveal--state-metadata nil
         blame-reveal--process-id nil))
+
+(defun blame-reveal--state-error (error-msg)
+  "Handle error with ERROR-MSG. Performs emergency UI cleanup defensively."
+  (message "[State] Error: %s" error-msg)
+
+  ;; **紧急UI清理**：这是防御性编程，防止异步错误导致UI残留。
+  ;; 我们假设这个函数存在于 load-path 中，并且它不依赖 state.el。
+  (ignore-errors
+    (when (fboundp 'blame-reveal--cleanup-operation-ui-artifacts)
+      (blame-reveal--cleanup-operation-ui-artifacts)))
+
+  ;; 执行核心状态重置
+  (blame-reveal--state-reset-internal)
+
+  ;; 设置错误状态并在短暂延迟后恢复 idle (原逻辑)
+  (setq blame-reveal--state-status 'error)
+  (run-with-timer 0.1 nil
+                  (lambda ()
+                    (when (eq blame-reveal--state-status 'error)
+                      (setq blame-reveal--state-status 'idle)))))
+
+(defun blame-reveal--state-cancel (reason)
+  "Cancel current operation for REASON. Caller must clean up UI artifacts."
+  (message "[State] Cancel: %s" reason)
+  (blame-reveal--state-reset-internal))
 
 (defun blame-reveal--state-is-busy-p ()
   "Check if state machine is busy."

@@ -11,6 +11,7 @@
 (require 'blame-reveal-core)
 (require 'blame-reveal-overlay)
 (require 'blame-reveal-color)
+(require 'cl-lib)
 
 (defun blame-reveal--ensure-single-line-display (display style)
   "Ensure DISPLAY has exactly one line for inline/margin STYLE.
@@ -127,16 +128,18 @@ Saves original margin widths and applies calculated width to configured side."
   (setq blame-reveal--margin-width nil))
 
 (defun blame-reveal--icon (name &optional color fallback)
-  "Return an icon string for NAME.
-If COLOR is non-nil, apply foreground color.
-If `nerd-icons` is available, use `nerd-icons-octicon` with NAME.
-Otherwise use FALLBACK string or NAME itself."
-  (let ((fallback (or fallback name))
-        (face (when color `(:foreground ,color))))
-    (if (and (fboundp 'nerd-icons-octicon)
-             (require 'nerd-icons nil t))
-        (concat (nerd-icons-octicon name :face face) " ")
-      (propertize fallback 'face face))))
+  "Return icon for NAME using nerd-icons backends.
+NAME like 'nf-PREFIX-ICONNAME'. COLOR sets :foreground; FALLBACK if unavailable."
+  (let* ((face (when color `(:foreground ,color)))
+         (backend (and (string-match "^nf-\\([^-]+\\)-" name)
+                       (cdr (assoc (match-string 1 name)
+                                   '(("ips" . "ipsicon") ("oct" . "octicon") ("pom" . "pomicon")
+                                     ("powerline" . "powerline") ("fa" . "faicon") ("w" . "wicon")
+                                     ("suc" . "sucicon") ("dev" . "devicon") ("cod" . "codicon")
+                                     ("fl" . "flicon") ("md" . "mdicon"))))))
+         (fn (and backend (intern-soft (concat "nerd-icons-" backend)))))
+    (or (and fn (fboundp fn) (require 'nerd-icons nil t) (funcall fn name :face face))
+        (propertize (or fallback name) 'face face))))
 
 (defun blame-reveal--abbreviate-author (author)
   "Abbreviate AUTHOR name."
@@ -147,18 +150,6 @@ Otherwise use FALLBACK string or NAME itself."
     (replace-match "\\1 \\2" nil nil author))
    (t author)))
 
-;; (defun blame-reveal--get-move-copy-meta (commit-hash)
-;;   "Return plist (:prev-file ... :prev-commit ...) for COMMIT-HASH, or nil."
-;;   (when (and blame-reveal--move-copy-metadata
-;;              (hash-table-p blame-reveal--move-copy-metadata))
-;;     (let ((meta (gethash commit-hash blame-reveal--move-copy-metadata)))
-;;       (when meta
-;;         (let ((prev-file (plist-get meta :previous-file))
-;;               (prev-commit (plist-get meta :previous-commit)))
-;;           (when (and prev-file prev-commit)
-;;             ;; 返回规范化后的 plist
-;;             (list :previous-file prev-file
-;;                   :previous-commit prev-commit)))))))
 (defun blame-reveal--get-move-copy-meta (commit-hash)
   "Return plist (:previous-file ... :previous-commit ...)
 for COMMIT-HASH if moved/copied to a different file, else nil."
@@ -175,6 +166,35 @@ for COMMIT-HASH if moved/copied to a different file, else nil."
             (list :previous-file prev-file
                   :previous-commit prev-commit)))))))
 
+(defun blame-reveal--format-move-copy-for-header (move-meta color)
+  "Format move/copy meta for multi-line header display.
+Returns a cons cell (LINE . FACE) or nil."
+  (let* ((prev-file (plist-get move-meta :previous-file))
+         (prev-commit (plist-get move-meta :previous-commit))
+         (icon (blame-reveal--icon "nf-md-arrow_right_bottom" "󱞩"))
+         (line (format " %s %s · %s"
+                       icon
+                       prev-file
+                       (substring prev-commit 0 7)))
+         (face `(:foreground ,color :height 0.9 :slant italic)))
+    (cons line face)))
+
+(defun blame-reveal--format-move-copy-for-inline (move-meta)
+  "Format move/copy meta as a short string for inline display.
+Returns a string or nil."
+  (let* ((prev-file (plist-get move-meta :previous-file))
+         (prev-commit (plist-get move-meta :previous-commit))
+         (icon (blame-reveal--icon "nf-oct-file_moved" "⇝")))
+    (format " %s %s(%s)"
+            icon
+            (file-name-nondirectory prev-file)
+            (substring prev-commit 0 7))))
+
+(defun blame-reveal--format-move-copy-for-margin (move-meta)
+  "Format move/copy meta as an icon string for margin prefix.
+Returns a string (icon + space) or nil."
+  (when move-meta
+    (format "%s " (blame-reveal--icon "nf-oct-file_moved" "⇝"))))
 
 (defun blame-reveal-format-header-default (commit-hash commit-info color)
   "Default header formatter with abbreviated author names and move/copy info."
@@ -186,30 +206,25 @@ for COMMIT-HASH if moved/copied to a different file, else nil."
     (pcase-let ((`(,short-hash ,author ,date ,summary ,_timestamp ,_description) commit-info))
       (let* ((abbrev-author (blame-reveal--abbreviate-author author))
              (short-date (blame-reveal--shorten-time date))
-             (lines (list (format "▸ %s · %s · %s · %s"
-                                  abbrev-author summary short-date short-hash)))
-             (faces (list `(:foreground ,color :weight bold))))
+             (icon (blame-reveal--icon "nf-cod-git_commit" ""))
+             ;; 1. Base Line/Face
+             (base-line (format "%s%s · %s · %s · %s"
+                                icon abbrev-author summary short-date short-hash))
+             (base-face `(:foreground ,color :weight bold))
+             ;; 2. Move/Copy Line
+             (move-meta (blame-reveal--get-move-copy-meta commit-hash))
+             (move-line-cons (when move-meta
+                               (blame-reveal--format-move-copy-for-header move-meta color))))
 
-        ;; 添加移动/复制信息（只显示跨文件的）
-        (let* ((move-meta (blame-reveal--get-move-copy-meta commit-hash)))
-          (when move-meta
-            (let ((prev-file (plist-get move-meta :previous-file))
-                  (prev-commit (plist-get move-meta :previous-commit))
-                  (icon (blame-reveal--icon "nf-oct-file_moved")))
-              (setq lines
-                    (append lines
-                            (list (format "%s %s(%s)"
-                                          icon
-                                          prev-file
-                                          (substring prev-commit 0 7)))))
-              (setq faces
-                    (append faces
-                            (list `(:foreground ,color :height 0.9 :slant italic)))))))
-
-        (make-blame-reveal-commit-display
-         :lines lines
-         :faces faces
-         :color color)))))
+        (if move-line-cons
+            (make-blame-reveal-commit-display
+             :lines (list base-line (car move-line-cons))
+             :faces (list base-face (cdr move-line-cons))
+             :color color)
+          (make-blame-reveal-commit-display
+           :lines (list base-line)
+           :faces (list base-face)
+           :color color))))))
 
 (defun blame-reveal-format-inline-default (commit-hash commit-info color)
   "Default inline format function."
@@ -218,23 +233,15 @@ for COMMIT-HASH if moved/copied to a different file, else nil."
        :lines (list (format "[%s]" blame-reveal-uncommitted-label))
        :faces (list `(:foreground ,color))
        :color color)
-    (pcase-let ((`(,hash ,author ,_date ,msg ,_ ,_) commit-info))
-      (let* ((base-text (format " %s %s"
-                                (blame-reveal--abbreviate-author author)
-                                (substring msg 0 (min 40 (length msg)))))
-             ;; 获取 move/copy 信息（只展示文件名）
+    (pcase-let ((`(,hash ,author ,_date ,summary ,_ ,_) commit-info))
+      (let* ((icon (blame-reveal--icon "nf-cod-git_commit" ""))
+             (abbrev-author (blame-reveal--abbreviate-author author))
+             (base-text (format "%s%s · %s"
+                                icon abbrev-author summary))
              (move-meta (blame-reveal--get-move-copy-meta commit-hash))
              (move-info (when move-meta
-                          (let ((prev-file (plist-get move-meta :previous-file))
-                                (prev-commit (plist-get move-meta :previous-commit))
-                                (icon (blame-reveal--icon "nf-oct-file_moved")))
-                            (format " %s %s(%s)"
-                                    icon
-                                    (file-name-nondirectory prev-file)
-                                    (substring prev-commit 0 7)))))
-             (full-text (if move-info
-                            (concat base-text move-info)
-                          base-text)))
+                          (blame-reveal--format-move-copy-for-inline move-meta)))
+             (full-text (concat base-text (or move-info ""))))
         (make-blame-reveal-commit-display
          :lines (list full-text)
          :faces (list `(:foreground ,color :height 0.95))
@@ -248,80 +255,41 @@ for COMMIT-HASH if moved/copied to a different file, else nil."
        :faces (list `(:foreground ,color))
        :color color)
     (pcase-let ((`(,_hash ,author ,date ,_msg ,_ ,_) commit-info))
-      (let* ((base-text (format "%s · %s"
-                                (blame-reveal--abbreviate-author author)
-                                (blame-reveal--shorten-time date)))
-             ;; move/copy 存在就加前缀符号
+      (let* ((icon (blame-reveal--icon "nf-cod-git_commit" ""))
+             (abbrev-author (blame-reveal--abbreviate-author author))
+             (short-date (blame-reveal--shorten-time date))
+             (base-text (format "%s%s · %s"
+                                icon abbrev-author short-date))
              (move-meta (blame-reveal--get-move-copy-meta commit-hash))
-             (full-text (if move-meta
-                            (concat (blame-reveal--icon "nf-oct-file_moved") base-text)
-                          base-text)))
+             (prefix (blame-reveal--format-move-copy-for-margin move-meta))
+             (full-text (concat (or prefix "") base-text)))
         (make-blame-reveal-commit-display
          :lines (list full-text)
          :faces (list `(:foreground ,color :height 0.9))
          :color color)))))
 
+(defconst blame-reveal--time-formats
+  '(("\\([0-9]+\\) minutes? ago" . "m")
+    ("\\([0-9]+\\) hours? ago" . "h")
+    ("\\([0-9]+\\) days? ago" . "d")
+    ("\\([0-9]+\\) weeks? ago" . "w")
+    ;; 使用 'mo' 避免与 'm' (minutes) 混淆
+    ("\\([0-9]+\\) months? ago" . "mo")
+    ("\\([0-9]+\\) years? ago" . "y"))
+  "Alist of regex patterns and their compact suffixes for relative time shortening.")
+
 (defun blame-reveal--shorten-time (date-string)
-  "Shorten DATE-STRING to very compact format.
-Examples:
-  '5 minutes ago' -> '5m'
-  '2 hours ago' -> '2h'
-  '3 days ago' -> '3d'
-  '2 weeks ago' -> '2w'
-  '1 month ago' -> '1mo'
-  '2 years ago' -> '2y'"
-  (cond
-   ;; Minutes
-   ((string-match "\\([0-9]+\\) minutes? ago" date-string)
-    (concat (match-string 1 date-string) "m"))
-   ;; Hours
-   ((string-match "\\([0-9]+\\) hours? ago" date-string)
-    (concat (match-string 1 date-string) "h"))
-   ;; Days
-   ((string-match "\\([0-9]+\\) days? ago" date-string)
-    (concat (match-string 1 date-string) "d"))
-   ;; Weeks
-   ((string-match "\\([0-9]+\\) weeks? ago" date-string)
-    (concat (match-string 1 date-string) "w"))
-   ;; Months - use "mo" to avoid confusion with minutes
-   ((string-match "\\([0-9]+\\) months? ago" date-string)
-    (concat (match-string 1 date-string) "mo"))
-   ;; Years
-   ((string-match "\\([0-9]+\\) years? ago" date-string)
-    (concat (match-string 1 date-string) "y"))
-   ;; Fallback
-   (t date-string)))
-
-(defun blame-reveal--format-margin-display (commit-hash info color)
-  "Format commit info for margin display (same for left/right)."
-  (if (string-match-p "^0+$" commit-hash)
-      (make-blame-reveal-commit-display
-       :lines (list "Uncommit")
-       :faces (list `(:foreground ,color :weight bold :height 0.9))
-       :color color)
-    (pcase-let ((`(,_hash ,author ,date ,_ ,_ ,_) info))
-      (let* ((abbrev-author (blame-reveal--abbreviate-author author))
-             (short-date (blame-reveal--shorten-time date)))
-        (make-blame-reveal-commit-display
-         :lines (list (format "%s · %s" abbrev-author short-date))
-         :faces (list `(:foreground ,color :weight bold :height 0.9))
-         :color color)))))
-
-(defun blame-reveal--format-inline-default (commit-hash info color)
-  "Default inline format."
-  (if (string-match-p "^0+$" commit-hash)
-      (make-blame-reveal-commit-display
-       :lines (list blame-reveal-uncommitted-label)
-       :faces (list `(:foreground ,color :weight bold :height 0.95))
-       :color color)
-    (pcase-let ((`(,hash ,author ,date ,msg ,_ ,_) info))
-      (let* ((abbrev-author (blame-reveal--abbreviate-author author))
-             (short-date (blame-reveal--shorten-time date)))
-        (make-blame-reveal-commit-display
-         :lines (list (format "[%s] %s · %s · %s"
-                              (substring hash 0 7) abbrev-author short-date msg))
-         :faces (list `(:foreground ,color :weight bold :height 0.95))
-         :color color)))))
+  "Shorten DATE-STRING to a very compact format using `blame-reveal--time-formats`.
+Examples: '5 minutes ago' -> '5m', '2 years ago' -> '2y'."
+  (cl-block nil
+    (dolist (entry blame-reveal--time-formats)
+      (let ((regex (car entry))
+            (suffix (cdr entry)))
+        (when (string-match regex date-string)
+          (let ((number-part (match-string 1 date-string)))
+            (when number-part
+              (cl-return (concat number-part suffix)))))))
+    date-string))
 
 (defun blame-reveal--get-formatted-display (commit-hash style)
   "Get formatted display for COMMIT-HASH in STYLE.
@@ -339,26 +307,26 @@ Processing flow:
   - Margin: Uses custom margin function if set, otherwise uses default compact format
 
 For inline and margin styles, ensures the result is single-line."
-  (let* ((info (gethash commit-hash blame-reveal--commit-info))
+(let* ((info (gethash commit-hash blame-reveal--commit-info))
          (color (blame-reveal--get-commit-color commit-hash))
          (display
           (pcase style
             ('margin
-             ;; Margin: custom function or default compact format
+             ;; Margin: custom function or default (blame-reveal-format-margin-default)
              (if (and (boundp 'blame-reveal-margin-format-function)
                       blame-reveal-margin-format-function)
                  (funcall blame-reveal-margin-format-function commit-hash info color)
-               (blame-reveal--format-margin-display commit-hash info color)))
+               (blame-reveal-format-margin-default commit-hash info color)))
 
             ('inline
-             ;; Inline: custom function or default format
+             ;; Inline: custom function or default (blame-reveal-format-inline-default)
              (if (and (boundp 'blame-reveal-inline-format-function)
                       blame-reveal-inline-format-function)
                  (funcall blame-reveal-inline-format-function commit-hash info color)
-               (blame-reveal--format-inline-default commit-hash info color)))
+               (blame-reveal-format-inline-default commit-hash info color)))
 
             ('block
-             ;; Block: use configured block format function
+             ;; Block: use configured block format function (defaults to blame-reveal-format-header-default)
              (funcall blame-reveal-header-format-function commit-hash info color)))))
 
     ;; Enforce single-line constraint for inline and margin styles
@@ -369,15 +337,22 @@ For inline and margin styles, ensures the result is single-line."
 (defun blame-reveal--format-header-string (lines faces fringe-face show-fringe
                                                  need-leading-newline &optional sticky-indicator)
   "Format header content string."
-  (let ((result (if need-leading-newline "\n" "")))
-    (dotimes (i (length lines))
+  (let ((result (if need-leading-newline "\n" ""))
+        (line-count (length lines)))
+    (dotimes (i line-count)
       (let ((line (nth i lines)) (face (nth i faces)))
         (when (and line (not (string-empty-p line)))
           (when show-fringe
             (setq result (concat result (propertize "!" 'display
                                                    (list blame-reveal-fringe-side 'blame-reveal-full fringe-face)))))
           (when sticky-indicator (setq result (concat result sticky-indicator)))
-          (setq result (concat result (propertize line 'face face) "\n")))))
+          (setq result (concat result (propertize line 'face face)))
+          ;; Only add newline for non-last lines
+          (when (< i (1- line-count))
+            (setq result (concat result "\n"))))))
+    ;; For first line (line 1), add trailing newline to separate from code
+    (when (not need-leading-newline)
+      (setq result (concat result "\n")))
     (when show-fringe
       (setq result (concat result (propertize "!" 'display (list blame-reveal-fringe-side 'blame-reveal-full fringe-face)))))
     result))

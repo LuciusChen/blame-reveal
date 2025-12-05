@@ -18,7 +18,11 @@ START-LINE and END-LINE specify optional line range.
 RELATIVE-FILE is the file path relative to git root."
   (let ((args (list "blame" "--porcelain")))
     (when blame-reveal--detect-moves
-      (setq args (append args '("-M" "-C"))))
+      ;; 使用 -C -C 进行深度 copy 检测
+      ;; -M: 检测同文件内的移动
+      ;; -C: 检测同 commit 内跨文件的 copy
+      ;; -C -C: 检测任意 commit 的 copy（创建文件时）
+      (setq args (append args '("-M" "-C" "-C"))))
     (when (and start-line end-line)
       (setq args (append args (list "-L" (format "%d,%d" start-line end-line)))))
     (when (and (boundp 'blame-reveal--current-revision)
@@ -43,6 +47,7 @@ Returns (BLAME-DATA . MOVE-METADATA) where:
       (goto-char (point-min))
       (while (not (eobp))
         (cond
+         ;; Commit hash line
          ((looking-at "^\\([a-f0-9]\\{40\\}\\) \\([0-9]+\\) \\([0-9]+\\)")
           (setq current-commit (match-string 1))
           (setq current-line-filename nil)
@@ -50,32 +55,56 @@ Returns (BLAME-DATA . MOVE-METADATA) where:
             (push (cons line-number current-commit) blame-data))
           (forward-line 1))
 
-         ;; 捕获 filename（这一行最初所在的文件）
+         ;; Filename field
          ((looking-at "^filename \\(.+\\)$")
           (setq current-line-filename (match-string 1))
-          ;; 如果 filename 与当前文件不同，记录为可能的 move
+          ;; 如果 filename 与 current-file 不同，记录为 potential move/copy
           (when (and current-commit
                      current-file
-                     (not (string= current-line-filename current-file)))
-            (puthash current-commit
-                     (list :previous-file current-line-filename
-                           :previous-commit current-commit)
-                     move-metadata))
+                     current-line-filename
+                     (not (or (string= current-line-filename current-file)
+                              (string= current-line-filename
+                                       (file-name-nondirectory current-file))
+                              (string= (file-name-nondirectory current-line-filename)
+                                       (file-name-nondirectory current-file)))))
+            ;; 检查是否已经有 previous 字段设置的 metadata
+            (unless (gethash current-commit move-metadata)
+              ;; 没有 previous 字段（可能是 boundary commit）
+              ;; 使用 filename 作为 previous-file，current-commit 作为 previous-commit
+              (puthash current-commit
+                       (list :previous-file current-line-filename
+                             :previous-commit current-commit)
+                       move-metadata)))
           (forward-line 1))
 
-         ;; previous 字段优先级更高（真正的跨文件复制）
+         ;; Previous field - 优先级更高，会覆盖 filename 的设置
          ((looking-at "^previous \\([a-f0-9]+\\) \\(.+\\)$")
           (when current-commit
-            (puthash current-commit
-                     (list :previous-commit (match-string 1)
-                           :previous-file (match-string 2))
-                     move-metadata))
+            (let ((prev-commit (match-string 1))
+                  (prev-file (match-string 2)))
+              ;; 跨文件的 previous 才记录
+              (when (and current-file
+                         prev-file
+                         (not (or (string= prev-file current-file)
+                                  (string= prev-file
+                                           (file-name-nondirectory current-file))
+                                  (string= (file-name-nondirectory prev-file)
+                                           (file-name-nondirectory current-file)))))
+                ;; previous 字段优先级更高，覆盖之前的设置
+                (puthash current-commit
+                         (list :previous-commit prev-commit
+                               :previous-file prev-file)
+                         move-metadata))))
           (forward-line 1))
 
+         ;; Tab line (content)
          ((looking-at "^\t")
           (forward-line 1))
+
+         ;; Other metadata
          (t
           (forward-line 1)))))
+
     (cons (nreverse blame-data) move-metadata)))
 
 ;;; Synchronous Loading
@@ -98,13 +127,11 @@ Returns (BLAME-DATA . MOVE-METADATA) where:
           (if (zerop (call-process "git" nil t nil "blame" "--porcelain" relative-file))
               (let ((result (blame-reveal--parse-blame-output
                              (current-buffer)
-                             relative-file)))  ; 传入 relative-file
-                ;; 保存 metadata 到 buffer-local 变量
+                             relative-file)))
                 (when (and (cdr result)
                            (hash-table-p (cdr result))
                            (> (hash-table-count (cdr result)) 0))
                   (setq blame-reveal--move-copy-metadata (cdr result)))
-                ;; 返回完整 result
                 result)
             nil))))))
 
@@ -269,7 +296,8 @@ Returns (BLAME-DATA . MOVE-METADATA) where:
              ;; Verify buffer state hasn't changed
              (if (not (and blame-reveal-mode
                            (equal (buffer-file-name)
-                                  (process-get proc 'source-file))))
+                                  (process-get proc 'source-file))
+                           (eq (current-buffer) ,source-buffer)))
                  (progn
                    (message "[Async] Ignoring callback: buffer state changed")
                    (when (buffer-live-p ,temp-buffer)
@@ -355,7 +383,7 @@ Returns (BLAME-DATA . MOVE-METADATA) where:
                      (relative-file (file-relative-name file git-root))
                      (result (blame-reveal--parse-blame-output
                               temp-buffer
-                              relative-file))  ; 传入 relative-file
+                              relative-file))
                      (blame-data (car result))
                      (move-metadata (cdr result)))
                 (if blame-data
@@ -423,7 +451,7 @@ Returns (BLAME-DATA . MOVE-METADATA) where:
                      (relative-file (file-relative-name file git-root))
                      (result (blame-reveal--parse-blame-output
                               temp-buffer
-                              relative-file))  ; 传入 relative-file
+                              relative-file))
                      (new-data (car result))
                      (move-metadata (cdr result)))
                 (if (null new-data)
@@ -450,7 +478,7 @@ Returns (BLAME-DATA . MOVE-METADATA) where:
                                       (max end-line (cdr blame-reveal--blame-data-range))))
                         (setq blame-reveal--blame-data-range
                               (cons start-line end-line)))
-                      ;; 合并 metadata
+                      ;; metadata
                       (when (> (hash-table-count move-metadata) 0)
                         (unless blame-reveal--move-copy-metadata
                           (setq blame-reveal--move-copy-metadata (make-hash-table :test 'equal)))

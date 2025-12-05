@@ -599,118 +599,119 @@ For small files, sync loading is actually faster due to less overhead."
 
 ;;; Minor Mode Definition
 
+(defun blame-reveal--can-enable-mode-p ()
+  "Check if blame-reveal-mode can be enabled in current buffer.
+Returns t if valid, otherwise prints message and returns nil."
+  (let ((file (buffer-file-name)))
+    (cond
+     ((null file)
+      (message "Blame-reveal: Buffer is not visiting a file")
+      nil)
+     ((not (vc-git-registered file))
+      (message "Blame-reveal: File is not tracked by git")
+      nil)
+     (t t))))
+
+(defun blame-reveal--setup-buffer-resources ()
+  "Initialize all resources, hooks, and state for the current buffer."
+
+  ;; 1. Keymap & Emulation (优先处理键位绑定)
+  (setq blame-reveal--emulation-alist
+        `((blame-reveal-mode . ,blame-reveal-mode-map)))
+  (add-to-list 'emulation-mode-map-alists 'blame-reveal--emulation-alist)
+
+  ;; 2. Subsystems Init (初始化子系统)
+  (blame-reveal--init-overlay-registry)
+  (blame-reveal--init-color-strategy)
+
+  ;; 3. State & Cache Reset (重置状态)
+  (setq blame-reveal--auto-days-cache nil
+        blame-reveal--blame-data-range nil
+        blame-reveal--all-commits-loaded nil)
+
+  ;; 初始化 hash table
+  (unless (hash-table-p blame-reveal--move-copy-metadata)
+    (setq blame-reveal--move-copy-metadata (make-hash-table :test 'equal)))
+
+  ;; 4. UI Setup (UI 设置)
+  (blame-reveal--setup-mode-line)
+  (blame-reveal--setup-theme-advice)
+
+  ;; 5. Hooks (绑定事件)
+  (add-hook 'after-save-hook #'blame-reveal--full-update nil t)
+  (add-hook 'window-scroll-functions #'blame-reveal--scroll-handler nil t)
+  (add-hook 'post-command-hook #'blame-reveal--update-header nil t)
+  (add-hook 'window-configuration-change-hook #'blame-reveal--render-visible-region nil t)
+
+  ;; 6. Trigger Loading (最后一步：开始加载数据)
+  (blame-reveal--load-blame-data))
+
+(defun blame-reveal--cleanup-buffer-resources ()
+  "Completely tear down all blame-reveal resources for the current buffer.
+Handles Hooks, Timers, Overlays, and State."
+
+  ;; 1. Remove Hooks (First, stop reacting to events)
+  (remove-hook 'after-save-hook #'blame-reveal--full-update t)
+  (remove-hook 'window-scroll-functions #'blame-reveal--scroll-handler t)
+  (remove-hook 'post-command-hook #'blame-reveal--update-header t)
+  (remove-hook 'window-configuration-change-hook #'blame-reveal--render-visible-region t)
+
+  ;; 2. Cancel All Timers (Using the helper from state or defining locally)
+  (blame-reveal--cleanup-operation-ui-artifacts)
+
+  ;; 3. Cancel State Machine (Stops async processes)
+  (blame-reveal--state-cancel "mode disabled")
+
+  ;; 4. Clean UI / Overlays
+  (blame-reveal--restore-window-margins)
+  (blame-reveal--clear-all-overlays) ; The unified registry clearer
+
+  ;; Legacy/Specific UI cleanup
+  (when (bound-and-true-p blame-reveal--header-overlay)
+    (delete-overlay blame-reveal--header-overlay)
+    (setq blame-reveal--header-overlay nil))
+  (blame-reveal--clear-sticky-header)
+
+  ;; 5. Reset Cache & Variables
+  (setq blame-reveal--auto-days-cache nil
+        blame-reveal--blame-data-range nil
+        blame-reveal--all-commits-loaded nil
+        blame-reveal--detect-moves nil
+        blame-reveal--move-copy-metadata nil
+        blame-reveal--blame-stack nil
+        blame-reveal--current-revision nil
+        blame-reveal--revision-display nil)
+
+  ;; 6. Advice Cleanup
+  (blame-reveal--remove-theme-advice))
+
 ;;;###autoload
 (define-minor-mode blame-reveal-mode
   "Toggle git blame fringe display."
   :lighter " BlameReveal"
   :group 'blame-reveal
   (if blame-reveal-mode
-      (progn
-        (let ((file (buffer-file-name)))
-          (if (not (and file (vc-git-registered file)))
-              (progn
-                (message "Cannot enable blame-reveal-mode: not a git-tracked file")
-                (setq blame-reveal-mode nil))
+      ;; --- Enable Phase ---
+      (if (blame-reveal--can-enable-mode-p)
+          (progn
+            (blame-reveal--setup-buffer-resources)
+            (run-hooks 'blame-reveal-mode-on-hook))
 
-            (setq blame-reveal--emulation-alist
-                  `((blame-reveal-mode . ,blame-reveal-mode-map)))
-            (add-to-list 'emulation-mode-map-alists
-                         'blame-reveal--emulation-alist)
+        ;; 如果检查失败，强制关闭 mode (避免 mode 变量为 t 但实际没跑起来)
+        (setq blame-reveal-mode nil))
 
-            ;; Initialize unified overlay management
-            (blame-reveal--init-overlay-registry)
-            (blame-reveal--init-color-strategy)
+    ;; --- Disable Phase ---
+    (blame-reveal--cleanup-buffer-resources)
 
-            ;; Initialize state
-            (setq blame-reveal--auto-days-cache nil)
-            (setq blame-reveal--blame-data-range nil)
-            (setq blame-reveal--all-commits-loaded nil)
-
-            ;; Initialize move/copy metadata
-            (unless (hash-table-p blame-reveal--move-copy-metadata)
-              (setq blame-reveal--move-copy-metadata (make-hash-table :test 'equal)))
-
-            ;; Load blame data
-            (blame-reveal--load-blame-data)
-
-            (add-hook 'after-save-hook #'blame-reveal--full-update nil t)
-            (add-hook 'window-scroll-functions #'blame-reveal--scroll-handler nil t)
-            (add-hook 'post-command-hook #'blame-reveal--update-header nil t)
-            (add-hook 'window-configuration-change-hook #'blame-reveal--render-visible-region nil t)
-
-            (blame-reveal--setup-mode-line)
-            (setq blame-reveal--blame-stack nil)
-            (setq blame-reveal--current-revision nil)
-            (setq blame-reveal--revision-display nil)
-
-            (blame-reveal--setup-theme-advice)
-
-            (run-hooks 'blame-reveal-mode-on-hook))))
-
-    ;; Cleanup when disabling mode
-    (setq emulation-mode-map-alists
-          (delq 'blame-reveal--emulation-alist
-                emulation-mode-map-alists))
-
-    (blame-reveal--restore-window-margins)
-    (blame-reveal--stop-loading-animation)
-    (blame-reveal--state-cancel "mode disabled")
-
-    (when blame-reveal--temp-overlay-timer
-      (cancel-timer blame-reveal--temp-overlay-timer)
-      (setq blame-reveal--temp-overlay-timer nil))
-
-    (when blame-reveal--header-update-timer
-      (cancel-timer blame-reveal--header-update-timer)
-      (setq blame-reveal--header-update-timer nil))
-
-    ;; Use unified cleanup
-    (blame-reveal--clear-all-overlays)
-
-    ;; Clear legacy header overlay
-    (when blame-reveal--header-overlay
-      (delete-overlay blame-reveal--header-overlay)
-      (setq blame-reveal--header-overlay nil))
-
-    (blame-reveal--clear-sticky-header)
-
-    (remove-hook 'after-save-hook #'blame-reveal--full-update t)
-    (remove-hook 'window-scroll-functions #'blame-reveal--scroll-handler t)
-    (remove-hook 'post-command-hook #'blame-reveal--update-header t)
-    (remove-hook 'window-configuration-change-hook #'blame-reveal--render-visible-region t)
-
-    (when blame-reveal--scroll-timer
-      (cancel-timer blame-reveal--scroll-timer)
-      (setq blame-reveal--scroll-timer nil))
-
-    (setq blame-reveal--state-status 'idle
-          blame-reveal--state-operation nil
-          blame-reveal--state-mode nil
-          blame-reveal--state-metadata nil
-          blame-reveal--state-process nil
-          blame-reveal--state-buffer nil)
-
-    (setq blame-reveal--auto-days-cache nil)
-    (setq blame-reveal--blame-data-range nil)
-    (setq blame-reveal--all-commits-loaded nil)
-
-    (setq blame-reveal--detect-moves nil)
-    (setq blame-reveal--move-copy-metadata nil)
-
+    ;; Global cleanup (if no other buffers are using the mode)
     (unless (cl-some (lambda (buf)
                        (with-current-buffer buf
                          (and (not (eq buf (current-buffer)))
                               blame-reveal-mode)))
                      (buffer-list))
+      (blame-reveal--cleanup-mode-line))
 
-      (blame-reveal--cleanup-mode-line)
-      (setq blame-reveal--blame-stack nil)
-      (setq blame-reveal--current-revision nil)
-      (setq blame-reveal--revision-display nil)
-
-      (blame-reveal--remove-theme-advice)
-
-      (run-hooks 'blame-reveal-mode-off-hook))))
+    (run-hooks 'blame-reveal-mode-off-hook)))
 
 ;;; Global Mode
 

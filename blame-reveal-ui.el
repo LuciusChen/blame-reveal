@@ -484,29 +484,44 @@ Recalculates colors and refreshes all displays."
        (blame-reveal--state-error (error-message-string err))
        (message "Failed to load git blame: %s" (error-message-string err))))))
 
+(defun blame-reveal--safe-cancel-timer (timer-symbol)
+  "Safely cancel timer bound to TIMER-SYMBOL and set it to nil."
+  (let ((timer (and (boundp timer-symbol) (symbol-value timer-symbol))))
+    (when (timerp timer)
+      (cancel-timer timer))
+    (set timer-symbol nil)))
+
+
+(defun blame-reveal--cleanup-operation-ui-artifacts ()
+  "Cleanup UI elements and timers directly related to an active operation.
+Used for immediate aborts (error or cancel)."
+
+  (blame-reveal--stop-loading-animation)
+
+  ;; 1. 清理 Timers
+  (blame-reveal--safe-cancel-timer 'blame-reveal--temp-overlay-timer)
+  (blame-reveal--safe-cancel-timer 'blame-reveal--header-update-timer)
+
+  ;; 2. 清理 Header Overlays
+  (ignore-errors
+    (when (bound-and-true-p blame-reveal--header-overlay)
+      (delete-overlay blame-reveal--header-overlay)
+      (setq blame-reveal--header-overlay nil))
+    (when (fboundp 'blame-reveal--clear-sticky-header)
+      (blame-reveal--clear-sticky-header))))
+
 (defun blame-reveal--full-update ()
   "Full update: reload blame data and render visible region."
   (interactive)
   ;; 强制取消当前操作并清理
   (when (blame-reveal--state-is-busy-p)
     (message "[Update] Cancelling current operation...")
-    ;; 立即停止动画
+
+    ;; **UI 清理 (留在 UI 层)**
     (blame-reveal--stop-loading-animation)
-    ;; 立即清理异步资源
-    (when blame-reveal--state-process
-      (when (process-live-p blame-reveal--state-process)
-        (delete-process blame-reveal--state-process))
-      (setq blame-reveal--state-process nil))
-    (when blame-reveal--state-buffer
-      (when (buffer-live-p blame-reveal--state-buffer)
-        (kill-buffer blame-reveal--state-buffer))
-      (setq blame-reveal--state-buffer nil))
-    ;; 重置状态
-    (setq blame-reveal--state-status 'idle
-          blame-reveal--state-operation nil
-          blame-reveal--state-mode nil
-          blame-reveal--state-metadata nil
-          blame-reveal--process-id nil))
+
+    ;; **状态清理 (委托给 State 层)**
+    (blame-reveal--state-cancel "full update requested"))
 
   ;; 短暂延迟，确保清理完成
   (run-with-timer
@@ -514,7 +529,7 @@ Recalculates colors and refreshes all displays."
    (lambda (buf)
      (when (buffer-live-p buf)
        (with-current-buffer buf
-         ;; Reset data
+         ;; Reset buffer-specific data (这些数据是独立于 state 进程的)
          (setq blame-reveal--blame-data nil
                blame-reveal--blame-data-range nil
                blame-reveal--commit-info nil
