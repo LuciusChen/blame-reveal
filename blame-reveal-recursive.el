@@ -120,14 +120,46 @@ Returns (PREV-FILE . PREV-COMMIT) or nil."
 ;;; State Management
 
 (defun blame-reveal--save-current-state ()
-  "Save current blame state to stack."
+  "Save current blame state to stack.
+On first recursive blame from HEAD, also saves initial HEAD state at bottom of stack."
+  ;; Special case: First recursive blame from HEAD
+  ;; Save a pristine HEAD state at the bottom of the stack for smooth reset
+  (when (and (null blame-reveal--blame-stack)
+             (null blame-reveal--current-revision))
+    (let ((head-state (list :revision nil
+                            :revision-display nil
+                            :detect-moves blame-reveal--detect-moves
+                            :blame-data (when blame-reveal--blame-data
+                                          (copy-sequence blame-reveal--blame-data))
+                            :blame-data-range blame-reveal--blame-data-range
+                            :commit-info (when (hash-table-p blame-reveal--commit-info)
+                                           (copy-hash-table blame-reveal--commit-info))
+                            :color-map (when (hash-table-p blame-reveal--color-map)
+                                         (copy-hash-table blame-reveal--color-map))
+                            ;; timestamps is a cons cell (min . max), not a list
+                            :timestamps (when blame-reveal--timestamps
+                                          (cons (car blame-reveal--timestamps)
+                                                (cdr blame-reveal--timestamps)))
+                            :recent-commits (when blame-reveal--recent-commits
+                                              (copy-sequence blame-reveal--recent-commits))
+                            :window-start (window-start)
+                            :point (point)
+                            :is-head-state t)))
+      ;; Initialize stack with HEAD state as foundation
+      (setq blame-reveal--blame-stack (list head-state))))
+
+  ;; Save current state before transitioning
   (push (list :revision blame-reveal--current-revision
               :revision-display blame-reveal--revision-display
+              :detect-moves blame-reveal--detect-moves
               :blame-data blame-reveal--blame-data
               :blame-data-range blame-reveal--blame-data-range
               :commit-info (copy-hash-table blame-reveal--commit-info)
               :color-map (copy-hash-table blame-reveal--color-map)
-              :timestamps blame-reveal--timestamps
+              ;; timestamps is a cons cell (min . max)
+              :timestamps (when blame-reveal--timestamps
+                            (cons (car blame-reveal--timestamps)
+                                  (cdr blame-reveal--timestamps)))
               :recent-commits blame-reveal--recent-commits
               :window-start (window-start)
               :point (point))
@@ -649,23 +681,42 @@ Returns non-nil if action was executed, nil if stopped/cancelled."
 
 ;;;###autoload
 (defun blame-reveal-reset-to-head ()
-  "Reset blame to HEAD (newest revision), clearing the stack."
+  "Reset blame to HEAD (newest revision), clearing the stack.
+Uses smooth transition to avoid flashing."
   (interactive)
   (unless blame-reveal-mode
     (user-error "blame-reveal-mode is not enabled"))
   (when (blame-reveal--state-is-busy-p)
     (blame-reveal--state-cancel "reset to HEAD"))
+
   (cond
+   ;; Case 1: Currently viewing a historical revision
    (blame-reveal--current-revision
-    (setq blame-reveal--blame-stack nil)
-    (setq blame-reveal--current-revision nil)
-    (setq blame-reveal--revision-display nil)
-    (setq blame-reveal--auto-days-cache nil)
-    (blame-reveal--full-update)
-    (message "Reset to HEAD"))
+    ;; Look for HEAD state at bottom of stack
+    (let ((head-state (car (last blame-reveal--blame-stack))))
+      (if (and head-state (plist-get head-state :is-head-state))
+          ;; Found HEAD state - restore it using smooth transition
+          (progn
+            (setq blame-reveal--blame-stack nil)
+            (setq blame-reveal--current-revision nil)
+            (setq blame-reveal--revision-display nil)
+            (setq blame-reveal--auto-days-cache nil)
+            (blame-reveal--restore-state head-state)
+            (message "Reset to HEAD"))
+        ;; No HEAD state found - fall back to full update
+        (setq blame-reveal--blame-stack nil)
+        (setq blame-reveal--current-revision nil)
+        (setq blame-reveal--revision-display nil)
+        (setq blame-reveal--auto-days-cache nil)
+        (blame-reveal--full-update)
+        (message "Reset to HEAD (reloaded)"))))
+
+   ;; Case 2: At HEAD but have stack
    (blame-reveal--blame-stack
     (setq blame-reveal--blame-stack nil)
     (message "Cleared blame stack"))
+
+   ;; Case 3: Already at HEAD with empty stack
    (t
     (message "Already at HEAD"))))
 

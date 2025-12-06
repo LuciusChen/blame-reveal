@@ -51,7 +51,11 @@ Both should be relative to GIT-ROOT."
 CURRENT-FILE is the file being blamed (relative to git root).
 Returns (BLAME-DATA . MOVE-METADATA) where:
 - BLAME-DATA is list of (LINE-NUMBER . COMMIT-HASH)
-- MOVE-METADATA is hash table of commit -> previous info"
+- MOVE-METADATA is hash table of commit -> previous info
+
+IMPORTANT: The 'filename' field in git blame output indicates the filename
+at the time the line was last modified, NOT a cross-file operation.
+Only the 'previous' field reliably indicates cross-file move/copy."
   (let* ((blame-data nil)
          (current-commit nil)
          (current-line-filename nil)
@@ -72,37 +76,24 @@ Returns (BLAME-DATA . MOVE-METADATA) where:
           (forward-line 1))
 
          ;; Filename field
+         ;; This indicates the filename when the line was last modified.
+         ;; It may differ from current-file due to renames in the file's history.
+         ;; DO NOT use this to detect cross-file operations!
          ((looking-at "^filename \\(.+\\)$")
           (setq current-line-filename (match-string 1))
-          ;; 如果 filename 与 current-file 不同，记录为 potential move/copy
-          (when (and current-commit
-                     (blame-reveal--is-cross-file-p current-line-filename
-                                                    current-file
-                                                    git-root))
-            ;; 检查是否已经有 previous 字段设置的 metadata
-            (unless (gethash current-commit move-metadata)
-              ;; 没有 previous 字段（可能是 boundary commit）
-              ;; 使用 filename 作为 previous-file，current-commit 作为 previous-commit
-              (puthash current-commit
-                       (list :previous-file current-line-filename
-                             :previous-commit current-commit)
-                       move-metadata)))
+          ;; Store filename for informational purposes only
+          ;; Could be used for display/debugging, but not for logic decisions
           (forward-line 1))
 
-         ;; Previous field - 优先级更高，会覆盖 filename 的设置
+         ;; Previous field - THE ONLY RELIABLE SOURCE for cross-file operations
+         ;; Format: "previous <commit-hash> <filename>"
+         ;; This indicates where the line came from (different file or commit)
          ((looking-at "^previous \\([a-f0-9]+\\) \\(.+\\)$")
           (when current-commit
             (let ((prev-commit (match-string 1))
                   (prev-file (match-string 2)))
-              ;; 跨文件的 previous 才记录
-              (when (and current-file
-                         prev-file
-                         (not (or (string= prev-file current-file)
-                                  (string= prev-file
-                                           (file-name-nondirectory current-file))
-                                  (string= (file-name-nondirectory prev-file)
-                                           (file-name-nondirectory current-file)))))
-                ;; previous 字段优先级更高，覆盖之前的设置
+              ;; Only record if this is truly a cross-file operation
+              (when (blame-reveal--is-cross-file-p prev-file current-file git-root)
                 (puthash current-commit
                          (list :previous-commit prev-commit
                                :previous-file prev-file)
@@ -113,7 +104,7 @@ Returns (BLAME-DATA . MOVE-METADATA) where:
          ((looking-at "^\t")
           (forward-line 1))
 
-         ;; Other metadata
+         ;; Other metadata (author, committer, summary, etc.)
          (t
           (forward-line 1)))))
 

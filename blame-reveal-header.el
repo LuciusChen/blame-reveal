@@ -345,7 +345,7 @@ For inline and margin styles, ensures the result is single-line."
           (when show-fringe
             (setq result (concat result (propertize "!" 'display
                                                    (list blame-reveal-fringe-side 'blame-reveal-full fringe-face)))))
-          (when sticky-indicator (setq result (concat result sticky-indicator)))
+          (when sticky-indicator (setq result (concat result sticky-indicator " ")))
           (setq result (concat result (propertize line 'face face)))
           ;; Only add newline for non-last lines
           (when (< i (1- line-count))
@@ -430,11 +430,11 @@ For inline and margin styles, ensures the result is single-line."
           (overlay-put ov 'line-prefix
                        (propertize " " 'display
                                    `((margin ,(intern (format "%s-margin" side)))
-                                     ,(propertize (concat sticky-indicator margin-text)
+                                     ,(propertize (concat sticky-indicator " " margin-text)
                                                   'face margin-face))))))
        (is-inline
         (overlay-put ov 'after-string
-                     (concat "  " sticky-indicator
+                     (concat "  " sticky-indicator " "
                             (propertize (car (blame-reveal-commit-display-lines display))
                                       'face (car (blame-reveal-commit-display-faces display)))
                             (when show-fringe

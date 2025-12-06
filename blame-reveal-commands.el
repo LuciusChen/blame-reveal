@@ -148,7 +148,7 @@ Uses magit if `blame-reveal-use-magit' is configured to do so."
                     (insert description))
 
                   (goto-char (point-min))
-                  (view-mode 1)
+                  (special-mode)
                   (setq buffer-read-only t))
 
                 (pop-to-buffer (current-buffer))))))))))
