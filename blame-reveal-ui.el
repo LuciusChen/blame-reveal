@@ -13,14 +13,33 @@
 (require 'blame-reveal-color)
 (require 'blame-reveal-header)
 
+;;; Transient Protection
+
+(defvar-local blame-reveal--in-transient-setup nil
+  "Non-nil during transient-setup to prevent header interference.
+Set to t when transient-setup begins, cleared after it completes.")
+
 ;;; Loading Animation
+
+(defun blame-reveal--should-update-header-p ()
+  "Check if header update should proceed.
+Returns nil when:
+- Transient menu is being set up (first-time setup interference)
+- Minibuffer is active
+- Current buffer is not the selected window's buffer
+- Buffer is not visiting a file"
+  (and (not blame-reveal--in-transient-setup)
+       (not (active-minibuffer-window))
+       (eq (current-buffer) (window-buffer (selected-window)))
+       (buffer-file-name)))
 
 (defun blame-reveal--get-loading-gradient-color (intensity)
   "Get loading animation color with INTENSITY (0.0 to 1.0).
 Dark theme: intensity controls brightness (0=dark, 1=bright).
 Light theme: intensity controls darkness (0=light/invisible, 1=dark/visible)."
-  (let* ((is-dark (blame-reveal-color--is-dark-theme-p))
-         (scheme blame-reveal-color-scheme)
+  (when (blame-reveal--should-update-header-p)
+    (let* ((current-line (line-number-at-pos))
+           (current-block (blame-reveal--get-current-block)))
          (hue (plist-get scheme :hue))
          (saturation (plist-get scheme :saturation-max))
          ;; Calculate lightness based on intensity and theme
@@ -314,37 +333,48 @@ Uses caching to avoid repeated searches within the same block."
                 (list line-num (car result) (cdr result))))
         result))))
 
+(defun blame-reveal--should-update-header-p ()
+  "Check if header update should proceed.
+Returns nil when:
+- Minibuffer is active (any menu/completion system)
+- Current buffer is not the selected window's buffer
+- Buffer is not visiting a file"
+  (and (not (active-minibuffer-window))
+       (eq (current-buffer) (window-buffer (selected-window)))
+       (buffer-file-name)))
+
 (defun blame-reveal--update-header ()
   "Update header display based on cursor position.
 Throttles updates to avoid excessive calls during rapid cursor movement."
-  (let* ((current-line (line-number-at-pos))
-         (current-block (blame-reveal--get-current-block)))
-    (when current-block
-      (let ((commit-hash (car current-block)))
-        ;; Only clear the old overlay when switching blocks.
-        (when (and blame-reveal--last-rendered-commit
-                   (not (equal blame-reveal--last-rendered-commit commit-hash)))
-          (blame-reveal--clear-temp-overlays-for-commit
-           blame-reveal--last-rendered-commit)
-          (setq blame-reveal--last-rendered-commit nil))
-        ;; Update current block marker
-        (setq blame-reveal--current-block-commit commit-hash)
+  (when (blame-reveal--should-update-header-p)
+    (let* ((current-line (line-number-at-pos))
+           (current-block (blame-reveal--get-current-block)))
+      (when current-block
+        (let ((commit-hash (car current-block)))
+          ;; Only clear the old overlay when switching blocks.
+          (when (and blame-reveal--last-rendered-commit
+                     (not (equal blame-reveal--last-rendered-commit commit-hash)))
+            (blame-reveal--clear-temp-overlays-for-commit
+             blame-reveal--last-rendered-commit)
+            (setq blame-reveal--last-rendered-commit nil))
+          ;; Update current block marker
+          (setq blame-reveal--current-block-commit commit-hash)
 
-        ;; Throttle: Skip updates if they are in the same line or the same commit block.
-        (when (or (not blame-reveal--last-update-line)
-                  (not (equal blame-reveal--last-update-line current-line))
-                  (not (equal blame-reveal--last-rendered-commit commit-hash)))
+          ;; Throttle: Skip updates if they are in the same line or the same commit block.
+          (when (or (not blame-reveal--last-update-line)
+                    (not (equal blame-reveal--last-update-line current-line))
+                    (not (equal blame-reveal--last-rendered-commit commit-hash)))
 
-          (when blame-reveal--header-update-timer
-            (cancel-timer blame-reveal--header-update-timer)
-            (setq blame-reveal--header-update-timer nil))
+            (when blame-reveal--header-update-timer
+              (cancel-timer blame-reveal--header-update-timer)
+              (setq blame-reveal--header-update-timer nil))
 
-          (setq blame-reveal--header-update-timer
-                (run-with-idle-timer
-                 blame-reveal--scroll-render-delay nil
-                 (lambda ()
-                   (setq blame-reveal--last-update-line current-line)
-                   (blame-reveal--update-header-impl)))))))))
+            (setq blame-reveal--header-update-timer
+                  (run-with-idle-timer
+                   blame-reveal--scroll-render-delay nil
+                   (lambda ()
+                     (setq blame-reveal--last-update-line current-line)
+                     (blame-reveal--update-header-impl))))))))))
 
 (defun blame-reveal--update-header-impl ()
   "Implementation of header update (using unified header system)."
@@ -433,9 +463,11 @@ Delays rendering until scrolling stops."
         (cancel-timer blame-reveal--scroll-timer))
       ;; Clear permanent fringe overlays
       (blame-reveal--clear-overlays-by-type 'fringe)
-      (when blame-reveal--header-overlay
-        (delete-overlay blame-reveal--header-overlay)
-        (setq blame-reveal--header-overlay nil))
+      ;; CRITICAL FIX: Don't delete header during transient-setup
+      (unless blame-reveal--in-transient-setup
+        (when blame-reveal--header-overlay
+          (delete-overlay blame-reveal--header-overlay)
+          (setq blame-reveal--header-overlay nil)))
       (blame-reveal--clear-sticky-header)
       ;; Set new timer with configured delay
       (setq blame-reveal--scroll-timer

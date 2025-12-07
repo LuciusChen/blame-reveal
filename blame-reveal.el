@@ -216,7 +216,7 @@ Example - Author and time only:
   :group 'blame-reveal)
 
 (defcustom blame-reveal-margin-format-function
-    #'blame-reveal-format-margin-default
+  #'blame-reveal-format-margin-default
   "Function to format commit information for margin-style header.
 If nil, uses default compact format (Author · Date).
 
@@ -650,6 +650,32 @@ Returns t if valid, otherwise prints message and returns nil."
       nil)
      (t t))))
 
+(defun blame-reveal--protect-during-transient-setup (orig-fun &rest args)
+  "Prevent header deletion during transient-setup.
+Sets a buffer-local flag during transient-setup to prevent
+blame-reveal--update-header from interfering."
+  (let ((current-buf (current-buffer)))
+    ;; Set protection flag before transient-setup
+    (when (and (buffer-live-p current-buf)
+               (buffer-local-value 'blame-reveal-mode current-buf))
+      (with-current-buffer current-buf
+        (setq blame-reveal--in-transient-setup t)))
+
+    ;; Execute transient-setup
+    (unwind-protect
+        (apply orig-fun args)
+      ;; Clear protection flag after transient-setup completes
+      ;; Use a small delay to ensure transient is fully initialized
+      (run-with-timer
+       0.05 nil
+       (lambda ()
+         (when (buffer-live-p current-buf)
+           (with-current-buffer current-buf
+             (setq blame-reveal--in-transient-setup nil)
+             ;; Optionally trigger a header update to refresh
+             (when blame-reveal-mode
+               (blame-reveal--update-header)))))))))
+
 (defun blame-reveal--setup-buffer-resources ()
   "Initialize all resources, hooks, and state for the current buffer."
   ;; Keymap & Emulation
@@ -677,6 +703,8 @@ Returns t if valid, otherwise prints message and returns nil."
   (add-hook 'window-scroll-functions #'blame-reveal--scroll-handler nil t)
   (add-hook 'post-command-hook #'blame-reveal--update-header nil t)
   (add-hook 'window-configuration-change-hook #'blame-reveal--render-visible-region nil t)
+  ;; Transient Protection: prevent header deletion during transient-setup
+  (advice-add 'transient-setup :around #'blame-reveal--protect-during-transient-setup)
   ;; Trigger Loading
   (blame-reveal--load-blame-data))
 
@@ -714,6 +742,7 @@ Handles Hooks, Timers, Overlays, and State."
         blame-reveal--revision-display nil)
   ;; Advice Cleanup
   (blame-reveal--remove-theme-advice)
+  (advice-remove 'transient-setup #'blame-reveal--protect-during-transient-setup)
   (remove-hook 'text-scale-mode-hook #'blame-reveal--on-text-scale-change t))
 
 ;;;###autoload
