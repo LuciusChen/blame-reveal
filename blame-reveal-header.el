@@ -483,6 +483,8 @@ For inline and margin styles, ensures the result is single-line."
            (color (blame-reveal-commit-display-color display))
            (sticky-indicator (blame-reveal--icon "nf-oct-fold_up" color "")))
       (overlay-put ov 'blame-reveal-sticky t)
+      (blame-reveal--register-overlay ov 'sticky-header
+                                      (list :line (line-number-at-pos)))
       (cond
        (is-margin
         ;; For margin mode sticky header
@@ -579,8 +581,10 @@ For inline and margin styles, ensures the result is single-line."
       (and (not header-visible) in-this-block))))
 
 (defun blame-reveal--clear-sticky-header ()
-  "Clear sticky header using flicker-free system."
-  (blame-reveal--clear-sticky-header-no-flicker))
+  "Clear sticky header using registry system."
+  (dolist (ov (blame-reveal--get-overlays-by-type 'sticky-header))
+    (blame-reveal--unregister-overlay ov))
+  (setq blame-reveal--sticky-header-overlay nil))
 
 (defun blame-reveal--update-sticky-header ()
   "Update sticky header using flicker-free system."
