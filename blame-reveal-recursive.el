@@ -619,20 +619,40 @@ Returns non-nil if action was executed, nil if stopped/cancelled."
          (when state (blame-reveal--restore-state state)))
        (signal (car err) (cdr err))))))
 
+(defun blame-reveal--restore-state (state-plist)
+  "Restore all blame-reveal internal variables from STATE-PLIST."
+  (setq blame-reveal--current-revision (plist-get state-plist :revision))
+  (setq blame-reveal--revision-display (plist-get state-plist :revision-display))
+  (setq blame-reveal--auto-days-cache nil) ; 始终重置或从 plist 中获取 (此处代码保持原样)
+  (setq blame-reveal--blame-data         (plist-get state-plist :blame-data))
+  (setq blame-reveal--blame-data-range   (plist-get state-plist :blame-data-range))
+  (setq blame-reveal--timestamps         (plist-get state-plist :timestamps))
+  (setq blame-reveal--recent-commits     (plist-get state-plist :recent-commits))
+
+  (setq blame-reveal--commit-info
+        (blame-reveal--ensure-hash-table (plist-get state-plist :commit-info)))
+  (setq blame-reveal--color-map
+        (blame-reveal--ensure-hash-table (plist-get state-plist :color-map)))
+  (setq blame-reveal--move-copy-metadata
+        (blame-reveal--ensure-hash-table (plist-get state-plist :move-copy-metadata)))
+
+  (or (plist-get state-plist :revision-display) "working tree"))
+
 ;;;###autoload
 (defun blame-reveal-blame-back ()
-  "Go back to previous blame state in the recursion stack."
+  "Go back to previous blame state in the recursion stack, without flashing."
   (interactive)
   (unless blame-reveal-mode
     (user-error "blame-reveal-mode is not enabled"))
+
   (when (blame-reveal--state-is-busy-p)
     (blame-reveal--state-cancel "user navigated back"))
+
   (if (null blame-reveal--blame-stack)
       (message "Already at the newest revision")
     (let ((state (pop blame-reveal--blame-stack)))
-      (blame-reveal--restore-state state)
       (message "Returned to %s"
-               (or (plist-get state :revision-display) "working tree")))))
+               (blame-reveal--restore-state state)))))
 
 ;;;###autoload
 (defun blame-reveal-blame-at-revision (revision)
@@ -681,31 +701,12 @@ Uses smooth transition to avoid flashing."
       (if (and head-state (plist-get head-state :is-head-state))
           ;; Found HEAD state - restore data exactly like TEST A
           (progn
-            (setq blame-reveal--blame-stack nil)
-            (setq blame-reveal--current-revision nil)
-            (setq blame-reveal--revision-display nil)
-            (setq blame-reveal--auto-days-cache nil)
+            (setq blame-reveal--blame-stack nil) ; 清空堆栈
+            (setq blame-reveal--current-revision nil) ; HEAD 状态
+            (setq blame-reveal--revision-display nil) ; HEAD 状态
+            (setq blame-reveal--auto-days-cache nil) ; 重置缓存
 
-            ;; Restore data structures - exactly like TEST A
-            (setq blame-reveal--blame-data (plist-get head-state :blame-data))
-            (setq blame-reveal--blame-data-range (plist-get head-state :blame-data-range))
-
-            ;; Ensure hash-table types
-            (let ((commit-info (plist-get head-state :commit-info)))
-              (setq blame-reveal--commit-info
-                    (blame-reveal--ensure-hash-table commit-info)))
-
-            (let ((color-map (plist-get head-state :color-map)))
-              (setq blame-reveal--color-map
-                    (blame-reveal--ensure-hash-table color-map)))
-
-            (setq blame-reveal--timestamps (plist-get head-state :timestamps))
-            (setq blame-reveal--recent-commits (plist-get head-state :recent-commits))
-
-            ;; Restore move-copy-metadata from HEAD state
-            (let ((move-copy-metadata (plist-get head-state :move-copy-metadata)))
-              (setq blame-reveal--move-copy-metadata
-                    (blame-reveal--ensure-hash-table move-copy-metadata)))
+            (blame-reveal--restore-state head-state) ; 调用抽象函数
 
             ;; Don't call any render functions - same as TEST A
             (message "Reset to HEAD"))
