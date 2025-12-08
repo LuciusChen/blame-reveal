@@ -376,7 +376,8 @@ Throttles updates to avoid excessive calls during rapid cursor movement."
                      (blame-reveal--update-header-impl))))))))))
 
 (defun blame-reveal--update-header-impl ()
-  "Implementation of header update (using flicker-free system)."
+  "Implementation of header update.
+Uses in-place update for smooth transitions without flicker."
   (when blame-reveal--blame-data
     (blame-reveal--ensure-visible-commits-loaded)
     (if-let ((current-block (blame-reveal--get-current-block)))
@@ -390,17 +391,33 @@ Throttles updates to avoid excessive calls during rapid cursor movement."
                                      (not (blame-reveal--is-recent-commit-p commit-hash))))
                  (hide-header-fringe (and is-uncommitted
                                           (not blame-reveal-show-uncommitted-fringe)))
-                 ;; Check if we need to rebuild header
-                 (need-rebuild (or (not blame-reveal--header-overlay)
-                                   (not (equal commit-hash blame-reveal--last-rendered-commit)))))
+                 ;; Check if header style changed (requires rebuild)
+                 (style-changed (blame-reveal--header-style-changed-p))
+                 ;; Check if we need any update
+                 (need-update (or (not blame-reveal--header-overlay)
+                                  (not (equal commit-hash blame-reveal--last-rendered-commit))
+                                  style-changed)))
             (when blame-reveal--temp-overlay-timer
               (cancel-timer blame-reveal--temp-overlay-timer)
               (setq blame-reveal--temp-overlay-timer nil))
-            ;; Use flicker-free overlay replacement
-            (when need-rebuild
-              (let ((new-header (blame-reveal--create-header-overlay
-                                 block-start commit-hash color hide-header-fringe)))
-                (blame-reveal--replace-header-overlay new-header)))
+
+            (when need-update
+              (if (and blame-reveal--header-overlay
+                       (not style-changed)
+                       ;; Try in-place update first (no flicker)
+                       (blame-reveal--update-header-overlay-in-place
+                        blame-reveal--header-overlay
+                        block-start commit-hash color hide-header-fringe))
+                  ;; In-place update succeeded
+                  (setq blame-reveal--header-current-style
+                        (blame-reveal--get-effective-header-style))
+                ;; Need to create new overlay (first time or style changed)
+                (let ((new-header (blame-reveal--create-header-overlay
+                                   block-start commit-hash color hide-header-fringe)))
+                  (blame-reveal--replace-header-overlay new-header)
+                  (setq blame-reveal--header-current-style
+                        (blame-reveal--get-effective-header-style)))))
+
             (when (or is-old-commit
                       (and is-uncommitted blame-reveal-show-uncommitted-fringe))
               (setq blame-reveal--temp-overlay-timer
@@ -416,7 +433,8 @@ Throttles updates to avoid excessive calls during rapid cursor movement."
       (blame-reveal--clear-header-no-flicker)
       (blame-reveal--clear-temp-overlays)
       (setq blame-reveal--current-block-commit nil)
-      (setq blame-reveal--last-rendered-commit nil))
+      (setq blame-reveal--last-rendered-commit nil)
+      (setq blame-reveal--header-current-style nil))
     (blame-reveal--update-sticky-header)))
 
 (defun blame-reveal--scroll-handler-impl (buf)
@@ -427,18 +445,14 @@ Throttles updates to avoid excessive calls during rapid cursor movement."
                  (buffer-file-name))
         (condition-case err
             (progn
-              (when (and blame-reveal--blame-data-range
-                         (consp blame-reveal--blame-data-range)
-                         (car blame-reveal--blame-data-range)
-                         (cdr blame-reveal--blame-data-range))
+              (when blame-reveal--blame-data-range
                 (when-let ((range (blame-reveal--get-visible-line-range)))
                   (let ((start-line (car range))
                         (end-line (cdr range))
                         (current-start (car blame-reveal--blame-data-range))
                         (current-end (cdr blame-reveal--blame-data-range)))
-                    (when (and start-line end-line current-start current-end
-                               (or (< start-line current-start)
-                                   (> end-line current-end)))
+                    (when (or (< start-line current-start)
+                              (> end-line current-end))
                       (blame-reveal--ensure-range-loaded start-line end-line)))))
               (unless (and (eq blame-reveal--state-status 'loading)
                            (eq blame-reveal--state-operation 'expansion))
@@ -459,10 +473,10 @@ Delays rendering until scrolling stops."
       ;; Clear permanent fringe overlays
       (blame-reveal--clear-overlays-by-type 'fringe)
       ;; CRITICAL FIX: Don't delete header during transient-setup
+      ;; Use No-Flicker system to prevent flash during scroll
       (unless blame-reveal--in-transient-setup
-        (when blame-reveal--header-overlay
-          (delete-overlay blame-reveal--header-overlay)
-          (setq blame-reveal--header-overlay nil)))
+        (blame-reveal--clear-header-no-flicker))
+      ;; Clear sticky header (also clears cached state)
       (blame-reveal--clear-sticky-header)
       ;; Set new timer with configured delay
       (setq blame-reveal--scroll-timer
@@ -492,17 +506,17 @@ Recalculates colors and refreshes all displays."
                    blame-reveal--current-block-commit)
           (save-excursion
             (goto-char current-point)
-            ;; Force header refresh by clearing and re-triggering
-            (let ((old-commit blame-reveal--current-block-commit))
-              (setq blame-reveal--current-block-commit nil)
-              ;; Clear existing header
-              (when blame-reveal--header-overlay
-                (delete-overlay blame-reveal--header-overlay)
-                (setq blame-reveal--header-overlay nil))
-              ;; Clear temp overlays
-              (blame-reveal--clear-temp-overlays)
-              ;; Re-trigger header update
-              (blame-reveal--update-header))))))))
+            ;; Force header refresh by clearing cache and re-triggering
+            (setq blame-reveal--current-block-commit nil)
+            (setq blame-reveal--last-rendered-commit nil)
+            ;; Clear existing header using No-Flicker system
+            (blame-reveal--clear-header-no-flicker)
+            ;; Clear sticky header state to force refresh
+            (blame-reveal--clear-sticky-header)
+            ;; Clear temp overlays
+            (blame-reveal--clear-temp-overlays)
+            ;; Re-trigger header update
+            (blame-reveal--update-header)))))))
 
 (defun blame-reveal--on-theme-change (&rest _)
   "Handle theme change event and refresh all blame displays."

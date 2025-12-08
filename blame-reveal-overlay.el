@@ -180,11 +180,16 @@ The overlay will be deleted after the next redisplay, preventing flicker."
                           (current-buffer)))))
 
 (defun blame-reveal--execute-pending-deletions (buffer)
-  "Execute all pending overlay deletions for BUFFER."
+  "Execute all pending overlay deletions for BUFFER.
+Also removes overlays from registry if they were registered."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (dolist (ov blame-reveal--pending-delete-overlays)
         (when (overlayp ov)
+          ;; Remove from registry first (if registered)
+          (when (and (boundp 'blame-reveal--overlay-registry)
+                     blame-reveal--overlay-registry)
+            (remhash ov blame-reveal--overlay-registry))
           (delete-overlay ov)))
       (setq blame-reveal--pending-delete-overlays nil)
       (setq blame-reveal--delete-timer nil))))

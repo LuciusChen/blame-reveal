@@ -51,6 +51,15 @@
 (defvar-local blame-reveal--sticky-header-overlay nil
   "Overlay for sticky header at window top.")
 
+(defvar-local blame-reveal--sticky-header-state nil
+  "Cached state of sticky header for optimization.
+A plist with :commit, :visible, and :window-start keys.
+Used to avoid unnecessary sticky header recreation when state hasn't changed.")
+
+(defvar-local blame-reveal--header-current-style nil
+  "Current header style of the existing overlay.
+Used to detect style changes that require overlay rebuild.")
+
 (defvar-local blame-reveal--header-update-timer nil
   "Timer for delayed header update.")
 

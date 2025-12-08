@@ -25,7 +25,6 @@
 ;;; Code:
 
 (require 'blame-reveal)
-(require 'blame-reveal-core)
 (require 'blame-reveal-overlay)
 (require 'cl-lib)
 
@@ -205,9 +204,9 @@ by the unified no-flicker system."
            (blame-reveal--ensure-commit-info (nth 1 block))))
        (blame-reveal--update-recent-commits)
        (blame-reveal--render-visible-region))
-     ;; Update header and sticky header
-     (blame-reveal--update-header)
-     (blame-reveal--update-sticky-header))))
+     ;; Update header (which internally handles sticky header)
+     ;; Note: update-header-impl calls update-sticky-header, so we don't call it separately
+     (blame-reveal--update-header))))
 
 ;;; Error Handling
 
@@ -219,7 +218,6 @@ Restores previous state and provides context-aware error messages."
                           (blame-reveal--is-initial-commit-p base-commit)))
          (file-exists (and base-commit
                            (blame-reveal--git-file-exists-p base-commit file))))
-
     ;; First restore to previous state
     (condition-case restore-err
         (when blame-reveal--blame-stack
@@ -230,7 +228,6 @@ Restores previous state and provides context-aware error messages."
                 (error-message-string restore-err))
        (blame-reveal-reset-to-head)
        (cl-return-from blame-reveal--handle-load-error nil)))
-
     ;; Then provide context-aware error message
     (unwind-protect
         (cond
@@ -245,17 +242,17 @@ Restores previous state and provides context-aware error messages."
          ((and base-commit (not file-exists))
           (blame-reveal--state-error
            (format "File doesn't exist at %s" (substring base-commit 0 8)))
-          (message "File doesn't exist at commit %s" (substring base-commit 0 8))
-          (unless blame-reveal--detect-moves
-            (message "Tip: Try enabling move/copy detection (M) to trace file history")))
-
+          (if blame-reveal--detect-moves
+              (message "File doesn't exist at commit %s" (substring base-commit 0 8))
+            (message "File doesn't exist at commit %s. Tip: Press [M] to enable move/copy detection"
+                     (substring base-commit 0 8))))
          ;; Case 3: Other errors
          (t
           (blame-reveal--state-error (format "No blame data at %s" revision))
-          (message "No blame data at revision %s" revision)
-          (unless blame-reveal--detect-moves
-            (message "Tip: Try enabling move/copy detection (M) if the file was renamed/moved"))))
-
+          (if blame-reveal--detect-moves
+              (message "No blame data at revision %s" revision)
+            (message "No blame data at revision %s. Tip: Press [M] to enable move/copy detection"
+                     revision))))
       ;; Ensure state is reset in all cases
       (run-with-timer 0.2 nil
                       (lambda ()
@@ -555,9 +552,13 @@ Returns non-nil if action was executed, nil if stopped/cancelled."
         (message-text (plist-get action-info :message)))
 
     (pcase action
-      ;; Stop: just display message
+      ;; Stop: display message with optional tip
       ('stop
-       (message "%s" message-text)
+       (if blame-reveal--detect-moves
+           (message "%s" message-text)
+         ;; Add tip about M/C detection when not enabled
+         (message "%s. Tip: Try enabling move/copy detection (M) to trace file origin"
+                  message-text))
        nil)
 
       ;; Follow to different file

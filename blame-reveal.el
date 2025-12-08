@@ -290,10 +290,10 @@ while the fringe shows visual age indicators."
                  (when (and (eq value 'margin)
                             (not (blame-reveal--is-margin-mode-p)))
                    (blame-reveal--ensure-window-margins))
-                 ;; Refresh display
-                 (when blame-reveal--header-overlay
-                   (delete-overlay blame-reveal--header-overlay)
-                   (setq blame-reveal--header-overlay nil))
+                 ;; Refresh display using No-Flicker system
+                 (blame-reveal--clear-header-no-flicker)
+                 (blame-reveal--clear-sticky-header)
+                 (setq blame-reveal--last-rendered-commit nil)
                  (blame-reveal--update-header-impl))))))
   :group 'blame-reveal)
 
@@ -323,10 +323,10 @@ Only takes effect when header style is set to margin."
                  ;; Restore old margin and setup new one
                  (blame-reveal--restore-window-margins)
                  (blame-reveal--ensure-window-margins)
-                 ;; Refresh display
-                 (when blame-reveal--header-overlay
-                   (delete-overlay blame-reveal--header-overlay)
-                   (setq blame-reveal--header-overlay nil))
+                 ;; Refresh display using No-Flicker system
+                 (blame-reveal--clear-header-no-flicker)
+                 (blame-reveal--clear-sticky-header)
+                 (setq blame-reveal--last-rendered-commit nil)
                  (blame-reveal--update-header-impl))))))
   :group 'blame-reveal)
 
@@ -747,7 +747,13 @@ Handles Hooks, Timers, Overlays, and State."
         blame-reveal--move-copy-metadata nil
         blame-reveal--blame-stack nil
         blame-reveal--current-revision nil
-        blame-reveal--revision-display nil)
+        blame-reveal--revision-display nil
+        blame-reveal--header-current-style nil
+        blame-reveal--sticky-header-state nil
+        ;; Critical: reset header throttling state
+        blame-reveal--last-rendered-commit nil
+        blame-reveal--last-update-line nil
+        blame-reveal--current-block-commit nil)
   ;; Advice Cleanup
   (blame-reveal--remove-theme-advice)
   (advice-remove 'transient-setup #'blame-reveal--protect-during-transient-setup)

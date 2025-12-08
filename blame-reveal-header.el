@@ -499,10 +499,10 @@ For inline and margin styles, ensures the result is single-line."
        (is-inline
         (overlay-put ov 'after-string
                      (concat "  " sticky-indicator " "
-                            (propertize (car (blame-reveal-commit-display-lines display))
-                                      'face (car (blame-reveal-commit-display-faces display)))
-                            (when show-fringe
-                              (propertize "\n!" 'display (list blame-reveal-fringe-side 'blame-reveal-full fringe-face))))))
+                             (propertize (car (blame-reveal-commit-display-lines display))
+                                         'face (car (blame-reveal-commit-display-faces display)))
+                             (when show-fringe
+                               (propertize "\n!" 'display (list blame-reveal-fringe-side 'blame-reveal-full fringe-face))))))
        (t
         (overlay-put ov 'before-string
                      (blame-reveal--format-header-string
@@ -581,23 +581,101 @@ For inline and margin styles, ensures the result is single-line."
       (and (not header-visible) in-this-block))))
 
 (defun blame-reveal--clear-sticky-header ()
-  "Clear sticky header using registry system."
-  (dolist (ov (blame-reveal--get-overlays-by-type 'sticky-header))
-    (blame-reveal--unregister-overlay ov))
-  (setq blame-reveal--sticky-header-overlay nil))
+  "Clear sticky header using flicker-free system."
+  (blame-reveal--clear-sticky-header-no-flicker)
+  ;; Also clear cached state
+  (setq blame-reveal--sticky-header-state nil))
+
+(defun blame-reveal--update-sticky-header-in-place (overlay commit-hash)
+  "Update existing sticky header OVERLAY in place for COMMIT-HASH.
+Returns t if update succeeded, nil if rebuild is needed."
+  (when (and overlay (overlayp overlay) (overlay-buffer overlay))
+    (let* ((is-uncommitted (blame-reveal--is-uncommitted-p commit-hash))
+           (show-fringe (if is-uncommitted blame-reveal-show-uncommitted-fringe t))
+           (is-inline (eq blame-reveal-header-style 'inline))
+           (is-margin (blame-reveal--is-margin-style-p))
+           (style (cond (is-margin 'margin) (is-inline 'inline) (t 'block)))
+           (display (blame-reveal--get-formatted-display commit-hash style))
+           (color (blame-reveal-commit-display-color display))
+           (fringe-face (blame-reveal--ensure-fringe-face color))
+           (sticky-indicator (blame-reveal--icon "nf-oct-fold_up" color "")))
+      (save-excursion
+        (goto-char (window-start))
+        (let ((pos (if is-inline (line-end-position) (line-beginning-position))))
+          (if is-margin
+              (move-overlay overlay pos (line-end-position))
+            (move-overlay overlay pos pos)))
+        (cond
+         (is-margin
+          (let* ((margin-text (car (blame-reveal-commit-display-lines display)))
+                 (margin-face (car (blame-reveal-commit-display-faces display)))
+                 (side (or (blame-reveal--get-current-margin-side) 'left)))
+            (overlay-put overlay 'before-string nil)
+            (overlay-put overlay 'after-string nil)
+            (overlay-put overlay 'line-prefix
+                         (propertize " " 'display
+                                     `((margin ,(intern (format "%s-margin" side)))
+                                       ,(propertize (concat sticky-indicator " " margin-text)
+                                                    'face margin-face))))))
+         (is-inline
+          (overlay-put overlay 'before-string nil)
+          (overlay-put overlay 'line-prefix nil)
+          (overlay-put overlay 'after-string
+                       (concat "  " sticky-indicator " "
+                               (propertize (car (blame-reveal-commit-display-lines display))
+                                           'face (car (blame-reveal-commit-display-faces display)))
+                               (when show-fringe
+                                 (propertize "\n!" 'display
+                                             (list blame-reveal-fringe-side 'blame-reveal-full fringe-face))))))
+         (t
+          (overlay-put overlay 'after-string nil)
+          (overlay-put overlay 'line-prefix nil)
+          (overlay-put overlay 'before-string
+                       (blame-reveal--format-header-string
+                        (blame-reveal-commit-display-lines display)
+                        (blame-reveal-commit-display-faces display)
+                        fringe-face show-fringe nil sticky-indicator))))))
+    t))
 
 (defun blame-reveal--update-sticky-header ()
-  "Update sticky header using flicker-free system."
+  "Update sticky header using in-place update for smooth transitions."
   (when-let* ((current-block (blame-reveal--get-current-block))
               (commit-hash (car current-block))
               (block-start-line (cdr current-block))
               (current-line (line-number-at-pos)))
-    (if (blame-reveal--should-show-sticky-header-p commit-hash block-start-line current-line)
-        ;; Show sticky header - use flicker-free replacement
-        (let ((new-sticky (blame-reveal--create-sticky-header-overlay commit-hash)))
-          (blame-reveal--replace-sticky-header-overlay new-sticky))
-      ;; Hide sticky header - use flicker-free clearing
-      (blame-reveal--clear-sticky-header-no-flicker))))
+    (let* ((should-show (blame-reveal--should-show-sticky-header-p
+                         commit-hash block-start-line current-line))
+           (window-start (window-start))
+           ;; Check cached state
+           (cached-commit (plist-get blame-reveal--sticky-header-state :commit))
+           (cached-visible (plist-get blame-reveal--sticky-header-state :visible))
+           (cached-window-start (plist-get blame-reveal--sticky-header-state :window-start))
+           ;; Determine if update is needed
+           (need-update (or (not (equal cached-commit commit-hash))
+                            (not (eq cached-visible should-show))
+                            ;; Window start change affects sticky header position
+                            (and should-show
+                                 (not (equal cached-window-start window-start))))))
+      (when need-update
+        (if should-show
+            ;; Show sticky header
+            (if (and blame-reveal--sticky-header-overlay
+                     (equal cached-commit commit-hash)
+                     ;; Try in-place update if only position changed
+                     (blame-reveal--update-sticky-header-in-place
+                      blame-reveal--sticky-header-overlay commit-hash))
+                ;; In-place update succeeded
+                nil
+              ;; Need to create new overlay
+              (let ((new-sticky (blame-reveal--create-sticky-header-overlay commit-hash)))
+                (blame-reveal--replace-sticky-header-overlay new-sticky)))
+          ;; Hide sticky header - use flicker-free clearing
+          (blame-reveal--clear-sticky-header-no-flicker))
+        ;; Update cached state
+        (setq blame-reveal--sticky-header-state
+              (list :commit commit-hash
+                    :visible should-show
+                    :window-start window-start))))))
 
 (defun blame-reveal--create-header-overlay (line-number commit-hash color &optional no-fringe)
   "Create header overlay."
@@ -620,6 +698,76 @@ For inline and margin styles, ensures the result is single-line."
        (make-blame-reveal-header-context
         :commit-hash commit-hash :line-number (line-number-at-pos)
         :mode 'sticky :show-fringe-p show-fringe)))))
+
+;;; In-Place Header Update (Performance Optimization)
+
+(defun blame-reveal--get-effective-header-style ()
+  "Get effective header style symbol for comparison."
+  (cond
+   ((eq blame-reveal-header-style 'inline) 'inline)
+   ((blame-reveal--is-margin-style-p) 'margin)
+   (t 'block)))
+
+(defun blame-reveal--header-style-changed-p ()
+  "Check if header style has changed since last update."
+  (not (eq blame-reveal--header-current-style
+           (blame-reveal--get-effective-header-style))))
+
+(defun blame-reveal--update-header-overlay-in-place (overlay line commit-hash color no-fringe)
+  "Update existing header OVERLAY in place for LINE with COMMIT-HASH.
+This avoids creating/deleting overlays which causes visual flicker.
+Returns t if update succeeded, nil if rebuild is needed."
+  (when (and overlay (overlayp overlay) (overlay-buffer overlay))
+    (let* ((style (blame-reveal--get-effective-header-style))
+           (display (blame-reveal--get-formatted-display commit-hash style))
+           (fringe-face (blame-reveal--ensure-fringe-face color))
+           (show-fringe (not no-fringe)))
+      (save-excursion
+        (goto-char (point-min))
+        (forward-line (1- line))
+        (pcase style
+          ;; Block style: before-string at line beginning
+          ('block
+           (let* ((pos (if (= line 1) (point-min) (line-beginning-position)))
+                  (content (blame-reveal--format-header-string
+                            (blame-reveal-commit-display-lines display)
+                            (blame-reveal-commit-display-faces display)
+                            fringe-face show-fringe nil)))
+             (move-overlay overlay pos pos)
+             (overlay-put overlay 'before-string content)
+             (overlay-put overlay 'after-string nil)
+             (overlay-put overlay 'line-prefix nil)))
+
+          ;; Inline style: after-string at line end
+          ('inline
+           (unless (eobp)
+             (let* ((pos (line-end-position))
+                    (content (concat "  "
+                                     (propertize (car (blame-reveal-commit-display-lines display))
+                                                 'face (car (blame-reveal-commit-display-faces display)))
+                                     (when show-fringe
+                                       (propertize "\n!" 'display
+                                                   (list blame-reveal-fringe-side 'blame-reveal-full fringe-face))))))
+               (move-overlay overlay pos pos)
+               (overlay-put overlay 'before-string nil)
+               (overlay-put overlay 'after-string content)
+               (overlay-put overlay 'line-prefix nil))))
+
+          ;; Margin style: line-prefix
+          ('margin
+           (unless (eobp)
+             (let* ((bol (line-beginning-position))
+                    (margin-text (car (blame-reveal-commit-display-lines display)))
+                    (margin-face (car (blame-reveal-commit-display-faces display)))
+                    (side (or (blame-reveal--get-current-margin-side) 'left)))
+               (move-overlay overlay bol (1+ bol))
+               (overlay-put overlay 'before-string nil)
+               (overlay-put overlay 'after-string nil)
+               (overlay-put overlay 'line-prefix
+                            (propertize " " 'display
+                                        `((margin ,(intern (format "%s-margin" side)))
+                                          ,(propertize margin-text 'face margin-face)))))))))
+      t)))
 
 (provide 'blame-reveal-header)
 ;;; blame-reveal-header.el ends here
