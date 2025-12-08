@@ -25,6 +25,7 @@
 ;;; Code:
 
 (require 'blame-reveal)
+(require 'blame-reveal-core)
 (require 'blame-reveal-overlay)
 (require 'cl-lib)
 
