@@ -13,6 +13,17 @@
 (require 'blame-reveal-color)
 (require 'cl-lib)
 
+(defconst blame-reveal--time-formats
+  '(("year" . "y")
+    ;; Use 'mo' to avoid confusion with 'm' (minutes).
+    ("month" . "mo")
+    ("week" . "w")
+    ("day" . "d")
+    ("hour" . "h")
+    ("minute" . "m")
+    ("second" . "s"))
+  "Alist of full time unit names and their compact suffixes.")
+
 (cl-defstruct blame-reveal-format-context
   "Prepared formatting data for all formatters.
 This structure consolidates all the data needed by formatters,
@@ -329,28 +340,34 @@ REFACTORED: Uses blame-reveal-format-context to eliminate duplicate code."
          :faces (list `(:foreground ,color :height 0.9))
          :color color)))))
 
-(defconst blame-reveal--time-formats
-  '(("\\([0-9]+\\) minutes? ago" . "m")
-    ("\\([0-9]+\\) hours? ago" . "h")
-    ("\\([0-9]+\\) days? ago" . "d")
-    ("\\([0-9]+\\) weeks? ago" . "w")
-    ;; Use 'mo' to avoid confusion with 'm' (minutes).
-    ("\\([0-9]+\\) months? ago" . "mo")
-    ("\\([0-9]+\\) years? ago" . "y"))
-  "Alist of regex patterns and their compact suffixes for relative time shortening.")
-
 (defun blame-reveal--shorten-time (date-string)
-  "Shorten DATE-STRING to a very compact format using `blame-reveal--time-formats`.
-Examples: '5 minutes ago' -> '5m', '2 years ago' -> '2y'."
-  (cl-block nil
-    (dolist (entry blame-reveal--time-formats)
-      (let ((regex (car entry))
-            (suffix (cdr entry)))
-        (when (string-match regex date-string)
-          (let ((number-part (match-string 1 date-string)))
-            (when number-part
-              (cl-return (concat number-part suffix)))))))
-    date-string))
+  "Shorten DATE-STRING to a compact format (e.g., '2y 1mo') by extracting
+up to the two largest time units, assuming Git-like relative time format."
+  (let ((result nil)
+        (units-found 0))
+    ;; 1. Construct a universal regex pattern to match 'X unit(s)'
+    (let ((unit-names (mapconcat 'car blame-reveal--time-formats "\\|")))
+      ;; Loop up to 2 times to find the largest two units
+      (while (and (< units-found 2)
+                  ;; Match the pattern: (number) (unit_name)(s?)
+                  (string-match (format "\\([0-9]+\\) \\(%s\\)s?" unit-names)
+                                date-string))
+        (let* ((number-part (match-string 1 date-string))
+               (unit-name (match-string 2 date-string))
+               ;; Get the suffix from the alist
+               (suffix (cdr (assoc unit-name blame-reveal--time-formats))))
+          (when (and number-part suffix)
+            ;; Append "Xunit" (e.g., "2y") to the result list
+            (setq result (append result (list (concat number-part suffix))))
+            (cl-incf units-found)
+            ;; Remove the matched part (e.g., "2 years, ") to search for the next smaller unit
+            (setq date-string (replace-match "" t t date-string))
+            (setq date-string (string-trim-left date-string "[ ,]"))))))
+    ;; 3. Combine the results with a space (e.g., "2y 1mo")
+    (if result
+        (mapconcat 'identity result ",")
+      ;; If no unit was found, return the original string
+      date-string)))
 
 (defun blame-reveal--get-formatted-display (commit-hash style)
   "Get formatted display for COMMIT-HASH in STYLE.
