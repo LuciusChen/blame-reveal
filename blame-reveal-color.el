@@ -440,5 +440,43 @@ Returns: integer days limit or nil."
                         validated-days))
             validated-days))))))
 
+(defun blame-reveal--get-color-scheme-plist (preset)
+  "Return the full color scheme plist for the given PRESET symbol."
+  (pcase preset
+    ('blue
+     '(:hue 210 :dark-newest 0.70 :dark-oldest 0.35
+       :light-newest 0.45 :light-oldest 0.75
+       :saturation-min 0.25 :saturation-max 0.60))
+    ('green
+     '(:hue 120 :dark-newest 0.70 :dark-oldest 0.35
+       :light-newest 0.40 :light-oldest 0.75
+       :saturation-min 0.25 :saturation-max 0.60))
+    ('purple
+     '(:hue 280 :dark-newest 0.70 :dark-oldest 0.35
+       :light-newest 0.45 :light-oldest 0.75
+       :saturation-min 0.25 :saturation-max 0.60))
+    ('orange
+     '(:hue 30 :dark-newest 0.70 :dark-oldest 0.35
+       :light-newest 0.45 :light-oldest 0.75
+       :saturation-min 0.25 :saturation-max 0.60))
+    ('subtle
+     '(:hue 210 :dark-newest 0.60 :dark-oldest 0.40
+       :light-newest 0.55 :light-oldest 0.70
+       :saturation-min 0.20 :saturation-max 0.45))
+    ('vivid
+     '(:hue 210 :dark-newest 0.80 :dark-oldest 0.30
+       :light-newest 0.30 :light-oldest 0.80
+       :saturation-min 0.50 :saturation-max 0.80))
+    (_ blame-reveal-color-scheme)))
+
+(defun blame-reveal--apply-color-preset (preset)
+  "Apply the color scheme PRESET by setting `blame-reveal-color-scheme'
+  to the corresponding plist value."
+  (interactive)
+  (let ((new-scheme-plist (blame-reveal--get-color-scheme-plist preset)))
+    (customize-set-variable 'blame-reveal-color-scheme new-scheme-plist)
+    (blame-reveal--force-update-header)
+    (message "Applied color preset: %s" preset)))
+
 (provide 'blame-reveal-color)
 ;;; blame-reveal-color.el ends here
