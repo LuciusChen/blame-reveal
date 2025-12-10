@@ -598,6 +598,7 @@ Used for immediate aborts (error or cancel)."
    (lambda (buf)
      (when (buffer-live-p buf)
        (with-current-buffer buf
+         (blame-reveal--clear-overlays-by-type 'fringe)
          ;; Reset buffer-specific data
          (setq blame-reveal--blame-data nil
                blame-reveal--blame-data-range nil

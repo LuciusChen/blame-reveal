@@ -477,6 +477,7 @@ Always loads complete file for proper recursive blame navigation."
                (hash-table-count move-metadata))))
 
   (blame-reveal--state-transition 'rendering)
+  (blame-reveal--clear-overlays-by-type 'fringe)
   (blame-reveal--load-commits-incrementally)
   (blame-reveal--smooth-transition-render)
   (message "Loaded blame at %s (%d lines)"
