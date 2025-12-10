@@ -116,22 +116,23 @@ Uses magit if `blame-reveal-use-magit' is configured to do so."
                    (move-icon (blame-reveal--icon "nf-md-arrow_right_bottom" color "󱞩"))
                    (move-meta (blame-reveal--get-move-copy-metadata commit-hash))
                    (prev-file (when move-meta (plist-get move-meta :previous-file)))
-                   (prev-commit (when move-meta (plist-get move-meta :previous-commit))))
+                   (prev-commit (when move-meta (plist-get move-meta :previous-commit)))
+                   (fg-main (face-foreground 'default)))
 
               (with-current-buffer (get-buffer-create buffer-name)
                 (let ((inhibit-read-only t))
                   (erase-buffer)
                   ;; Commit info
                   (insert "Commit: ")
-                  (insert (propertize short-hash 'face `(:foreground ,color :weight bold)))
+                  (insert (propertize short-hash 'face `(:foreground ,fg-main :background ,color :weight bold)))
                   (insert "\n")
 
                   (insert "Author: ")
-                  (insert (propertize author 'face `(:foreground ,color)))
+                  (insert (propertize author 'face `(:foreground ,fg-main :background ,color)))
                   (insert "\n")
 
                   (insert "Date:   ")
-                  (insert (propertize date 'face `(:foreground ,color)))
+                  (insert (propertize date 'face `(:foreground ,fg-main :background ,color)))
                   (insert "\n\n")
                   ;; Move/Copy info
                   (when (and prev-file prev-commit)
@@ -139,9 +140,9 @@ Uses magit if `blame-reveal-use-magit' is configured to do so."
                                                 move-icon
                                                 prev-file
                                                 (substring prev-commit 0 blame-reveal--short-hash-length))
-                                        'face `(:foreground ,color :slant italic :height 0.95))))
+                                        'face `(:foreground ,fg-main :background ,color :slant italic :height 0.95))))
                   ;; Summary
-                  (insert (propertize summary 'face `(:foreground ,color :weight bold)))
+                  (insert (propertize summary 'face `(:foreground ,fg-main :background ,color :weight bold)))
                   (insert "\n\n")
                   ;; Description
                   (when (and description (not (string-empty-p description)))
@@ -236,7 +237,7 @@ and debugging color gradient issues."
                               (not (eq blame-reveal--current-revision 'uncommitted)))))
       ;; Collect timestamps
       (maphash (lambda (_commit info)
-                 (when-let ((ts (nth 4 info)))
+                 (when-let* ((ts (nth 4 info)))
                    (push ts timestamps)))
                blame-reveal--commit-info)
       (setq timestamps (sort timestamps #'>))

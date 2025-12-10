@@ -79,7 +79,7 @@ For example, 'abc123^' returns 'abc123'."
 Returns (PREV-FILE . PREV-COMMIT) or nil."
   (when (and blame-reveal--move-copy-metadata
              (hash-table-p blame-reveal--move-copy-metadata))
-    (when-let ((metadata (gethash commit-hash blame-reveal--move-copy-metadata)))
+    (when-let* ((metadata (gethash commit-hash blame-reveal--move-copy-metadata)))
       (let ((prev-file (plist-get metadata :previous-file))
             (prev-commit (plist-get metadata :previous-commit)))
         (when (and prev-file prev-commit)

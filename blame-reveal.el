@@ -584,8 +584,10 @@ Used when settings change via transient menu."
       (setq blame-reveal--header-update-timer nil))
     ;; Clear existing header (using flicker-free system)
     (blame-reveal--clear-header-no-flicker)
+    (blame-reveal--clear-sticky-header-no-flicker)
     ;; Reset last rendered commit to force rebuild
     (setq blame-reveal--last-rendered-commit nil)
+    (setq blame-reveal--sticky-header-state nil)
     ;; Update immediately (bypass idle delay)
     (blame-reveal--update-header-impl)))
 

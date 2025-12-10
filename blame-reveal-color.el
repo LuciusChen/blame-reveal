@@ -219,7 +219,7 @@ Returns a list: (COLOR IS-UNCOMMITTED IS-OLD-COMMIT HIDE-FRINGE)."
                          ('nil nil)
                          (_ blame-reveal-recent-days-limit))))
       (maphash (lambda (commit info)
-                 (when-let ((timestamp (nth 4 info)))
+                 (when-let* ((timestamp (nth 4 info)))
                    (push (cons commit timestamp) commit-timestamps)))
                blame-reveal--commit-info)
       (setq commit-timestamps
@@ -264,7 +264,7 @@ Returns a list: (COLOR IS-UNCOMMITTED IS-OLD-COMMIT HIDE-FRINGE)."
 Returns sorted list (newest first)."
   (let ((timestamps nil))
     (maphash (lambda (_commit info)
-               (when-let ((ts (nth 4 info)))
+               (when-let* ((ts (nth 4 info)))
                  (push ts timestamps)))
              blame-reveal--commit-info)
     (sort timestamps #'>)))

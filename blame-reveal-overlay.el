@@ -42,10 +42,10 @@ Returns the overlay."
     (puthash overlay full-metadata blame-reveal--overlay-registry)
     (let ((type-list (gethash type blame-reveal--overlays-by-type)))
       (puthash type (cons overlay type-list) blame-reveal--overlays-by-type))
-    (when-let ((commit (plist-get metadata :commit)))
+    (when-let* ((commit (plist-get metadata :commit)))
       (let ((commit-list (gethash commit blame-reveal--overlays-by-commit)))
         (puthash commit (cons overlay commit-list) blame-reveal--overlays-by-commit)))
-    (when-let ((line (plist-get metadata :line)))
+    (when-let* ((line (plist-get metadata :line)))
       (let ((line-list (gethash line blame-reveal--overlays-by-line)))
         (puthash line (cons overlay line-list) blame-reveal--overlays-by-line)))
     overlay))
@@ -56,7 +56,7 @@ Safe to call even if overlay is already deleted or invalid.
 Note: This performs immediate deletion, use `blame-reveal--schedule-overlay-deletion'
 for flicker-free updates."
   (when (and overlay (overlayp overlay))
-    (when-let ((metadata (gethash overlay blame-reveal--overlay-registry)))
+    (when-let* ((metadata (gethash overlay blame-reveal--overlay-registry)))
       (let ((type (plist-get metadata :type))
             (commit (plist-get metadata :commit))
             (line (plist-get metadata :line)))
@@ -117,7 +117,7 @@ Returns overlay if found, nil otherwise."
 (defun blame-reveal--update-overlay-metadata (overlay metadata)
   "Update OVERLAY's metadata with new METADATA (plist).
 Preserves :type field, and updates commit/line indices if they change."
-  (when-let ((old-metadata (gethash overlay blame-reveal--overlay-registry)))
+  (when-let* ((old-metadata (gethash overlay blame-reveal--overlay-registry)))
     (let* ((type (plist-get old-metadata :type))
            (old-commit (plist-get old-metadata :commit))
            (old-line (plist-get old-metadata :line))

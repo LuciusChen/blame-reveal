@@ -147,7 +147,7 @@ Returns the configured side when in margin mode, nil otherwise."
 (defun blame-reveal--ensure-window-margins ()
   "Ensure window margins are set correctly for margin style.
 Saves original margin widths and applies calculated width to configured side."
-  (when-let ((side (blame-reveal--get-current-margin-side)))
+  (when-let* ((side (blame-reveal--get-current-margin-side)))
     (let ((needed-width (or blame-reveal--margin-width
                             (setq blame-reveal--margin-width
                                   (blame-reveal--calculate-margin-width)))))
@@ -261,15 +261,38 @@ Returns a string (icon + space) or nil."
   (when move-meta
     (format "%s " (blame-reveal--icon "nf-md-arrow_right_bottom" "󱞩"))))
 
+(defun blame-reveal--get-contrasting-foreground (bg-color)
+  "Return high-contrast foreground color for BG-COLOR."
+  (let* ((color (color-name-to-rgb bg-color))
+         (bg-luminance (+ (* 0.299 (nth 0 color))
+                          (* 0.587 (nth 1 color))
+                          (* 0.114 (nth 2 color))))
+         (default-fg (or (face-foreground 'default nil 'default) "#FFFFFF"))
+         (default-bg (or (face-background 'default nil 'default) "#000000"))
+         (fg-rgb (color-name-to-rgb default-fg))
+         (bg-rgb (color-name-to-rgb default-bg))
+         (fg-luminance (+ (* 0.299 (nth 0 fg-rgb))
+                          (* 0.587 (nth 1 fg-rgb))
+                          (* 0.114 (nth 2 fg-rgb))))
+         (bg-luminance-theme (+ (* 0.299 (nth 0 bg-rgb))
+                                (* 0.587 (nth 1 bg-rgb))
+                                (* 0.114 (nth 2 bg-rgb)))))
+    (if (> bg-luminance 0.5)
+        ;; Bright commit bg: use darker of fg/bg
+        (if (< fg-luminance bg-luminance-theme) default-fg default-bg)
+      ;; Dark commit bg: use brighter of fg/bg
+      (if (> fg-luminance bg-luminance-theme) default-fg default-bg))))
+
 (defun blame-reveal-format-header-default (commit-hash commit-info color)
   "Default header formatter with abbreviated author names and move/copy info.
 REFACTORED: Uses blame-reveal-format-context to eliminate duplicate code."
-  (let ((ctx (blame-reveal--prepare-format-context commit-hash commit-info color)))
+  (let* ((ctx (blame-reveal--prepare-format-context commit-hash commit-info color))
+        (fg-main (blame-reveal--get-contrasting-foreground color)))
     (if (blame-reveal-format-context-is-uncommitted ctx)
         ;; Uncommitted changes
         (make-blame-reveal-commit-display
          :lines (list (format "▸ %s" blame-reveal-uncommitted-label))
-         :faces (list `(:foreground ,color :weight bold))
+         :faces (list `(:foreground ,fg-main :background ,color :height 0.9))
          :color color)
       ;; Normal commit
       (let* ((base-line (format "%s%s · %s · %s · %s"
@@ -278,7 +301,7 @@ REFACTORED: Uses blame-reveal-format-context to eliminate duplicate code."
                                (blame-reveal-format-context-summary ctx)
                                (blame-reveal-format-context-short-date ctx)
                                (blame-reveal-format-context-short-hash ctx)))
-             (base-face `(:foreground ,color :weight bold))
+             (base-face `(:foreground ,fg-main :background ,color :height 0.9))
              (move-meta (blame-reveal-format-context-move-meta ctx))
              (move-line-cons (when move-meta
                               (blame-reveal--format-move-copy-for-header
@@ -296,12 +319,13 @@ REFACTORED: Uses blame-reveal-format-context to eliminate duplicate code."
 (defun blame-reveal-format-inline-default (commit-hash commit-info color)
   "Default inline format function.
 REFACTORED: Uses blame-reveal-format-context to eliminate duplicate code."
-  (let ((ctx (blame-reveal--prepare-format-context commit-hash commit-info color)))
+  (let* ((ctx (blame-reveal--prepare-format-context commit-hash commit-info color))
+        (fg-main (blame-reveal--get-contrasting-foreground color)))
     (if (blame-reveal-format-context-is-uncommitted ctx)
         ;; Uncommitted changes
         (make-blame-reveal-commit-display
          :lines (list (format "[%s]" blame-reveal-uncommitted-label))
-         :faces (list `(:foreground ,color :weight bold))
+         :faces (list `(:foreground ,fg-main :background ,color :height 0.9))
          :color color)
       ;; Normal commit
       (let* ((base-text (format "%s%s · %s"
@@ -314,18 +338,19 @@ REFACTORED: Uses blame-reveal-format-context to eliminate duplicate code."
              (full-text (concat base-text (or move-info ""))))
         (make-blame-reveal-commit-display
          :lines (list full-text)
-         :faces (list `(:foreground ,color :height 0.95))
+         :faces (list `(:foreground ,fg-main :background ,color :height 0.9))
          :color color)))))
 
 (defun blame-reveal-format-margin-default (commit-hash commit-info color)
   "Default margin format function.
 REFACTORED: Uses blame-reveal-format-context to eliminate duplicate code."
-  (let ((ctx (blame-reveal--prepare-format-context commit-hash commit-info color)))
+  (let* ((ctx (blame-reveal--prepare-format-context commit-hash commit-info color))
+         (fg-main (blame-reveal--get-contrasting-foreground color)))
     (if (blame-reveal-format-context-is-uncommitted ctx)
         ;; Uncommitted changes
         (make-blame-reveal-commit-display
          :lines (list "Uncommitted")
-         :faces (list `(:foreground ,color :weight bold))
+         :faces (list `(:foreground ,fg-main :background ,color :height 0.9))
          :color color)
       ;; Normal commit
       (let* ((base-text (format "%s%s · %s"
@@ -337,7 +362,7 @@ REFACTORED: Uses blame-reveal-format-context to eliminate duplicate code."
              (full-text (concat (or prefix "") base-text)))
         (make-blame-reveal-commit-display
          :lines (list full-text)
-         :faces (list `(:foreground ,color :height 0.9))
+         :faces (list `(:foreground ,fg-main :background ,color :height 0.9))
          :color color)))))
 
 (defun blame-reveal--shorten-time (date-string)
@@ -414,7 +439,8 @@ For inline and margin styles, ensures the result is single-line."
 
 (defun blame-reveal--format-header-string (lines faces fringe-face show-fringe
                                                  need-leading-newline &optional sticky-indicator)
-  "Format header content string."
+  "Format header content string.
+If STICKY-INDICATOR is provided, it should be a propertized string with face already applied."
   (let ((result (if need-leading-newline "\n" ""))
         (line-count (length lines)))
     (dotimes (i line-count)
@@ -423,7 +449,8 @@ For inline and margin styles, ensures the result is single-line."
           (when show-fringe
             (setq result (concat result (propertize "!" 'display
                                                    (list blame-reveal-fringe-side 'blame-reveal-full fringe-face)))))
-          (when sticky-indicator (setq result (concat result sticky-indicator " ")))
+          (when (and sticky-indicator (= i 0))
+            (setq result (concat result sticky-indicator)))
           (setq result (concat result (propertize line 'face face)))
           ;; Add newline between lines
           (when (< i (1- line-count))
@@ -497,27 +524,28 @@ For inline and margin styles, ensures the result is single-line."
            (is-margin (blame-reveal--is-margin-style-p))
            (pos (if is-inline (line-end-position) (line-beginning-position)))
            (ov (make-overlay pos (if is-margin (line-end-position) pos)))
-           (color (blame-reveal-commit-display-color display))
-           (sticky-indicator (blame-reveal--icon "nf-oct-fold_up" color "")))
+           (first-face (car (blame-reveal-commit-display-faces display)))
+           (sticky-indicator (propertize
+                             (concat (blame-reveal--icon "nf-oct-fold_up" nil "") " ")
+                             'face first-face)))
       (overlay-put ov 'blame-reveal-sticky t)
       (blame-reveal--register-overlay ov 'sticky-header
                                       (list :line (line-number-at-pos)))
       (cond
        (is-margin
-        ;; For margin mode sticky header
         (let* ((margin-text (car (blame-reveal-commit-display-lines display)))
                (margin-face (car (blame-reveal-commit-display-faces display)))
                (side (or (blame-reveal--get-current-margin-side) 'left)))
           (overlay-put ov 'line-prefix
                        (propertize " " 'display
                                    `((margin ,(intern (format "%s-margin" side)))
-                                     ,(propertize (concat sticky-indicator " " margin-text)
+                                     ,(propertize (concat sticky-indicator margin-text)
                                                   'face margin-face))))))
        (is-inline
         (overlay-put ov 'after-string
-                     (concat "  " sticky-indicator " "
+                     (concat "  " sticky-indicator
                              (propertize (car (blame-reveal-commit-display-lines display))
-                                         'face (car (blame-reveal-commit-display-faces display)))
+                                         'face first-face)
                              (when show-fringe
                                (propertize "\n!" 'display (list blame-reveal-fringe-side 'blame-reveal-full fringe-face))))))
        (t
@@ -615,7 +643,10 @@ Returns t if update succeeded, nil if rebuild is needed."
            (display (blame-reveal--get-formatted-display commit-hash style))
            (color (blame-reveal-commit-display-color display))
            (fringe-face (blame-reveal--ensure-fringe-face color))
-           (sticky-indicator (blame-reveal--icon "nf-oct-fold_up" color "")))
+           (first-face (car (blame-reveal-commit-display-faces display)))
+           (sticky-indicator (propertize
+                              (concat (blame-reveal--icon "nf-oct-fold_up" nil "") " ")
+                              'face first-face)))
       (save-excursion
         (goto-char (window-start))
         (let ((pos (if is-inline (line-end-position) (line-beginning-position))))
@@ -632,15 +663,15 @@ Returns t if update succeeded, nil if rebuild is needed."
             (overlay-put overlay 'line-prefix
                          (propertize " " 'display
                                      `((margin ,(intern (format "%s-margin" side)))
-                                       ,(propertize (concat sticky-indicator " " margin-text)
+                                       ,(propertize (concat sticky-indicator margin-text)
                                                     'face margin-face))))))
          (is-inline
           (overlay-put overlay 'before-string nil)
           (overlay-put overlay 'line-prefix nil)
           (overlay-put overlay 'after-string
-                       (concat "  " sticky-indicator " "
+                       (concat "  " sticky-indicator
                                (propertize (car (blame-reveal-commit-display-lines display))
-                                           'face (car (blame-reveal-commit-display-faces display)))
+                                           'face first-face)
                                (when show-fringe
                                  (propertize "\n!" 'display
                                              (list blame-reveal-fringe-side 'blame-reveal-full fringe-face))))))
@@ -651,8 +682,8 @@ Returns t if update succeeded, nil if rebuild is needed."
                        (blame-reveal--format-header-string
                         (blame-reveal-commit-display-lines display)
                         (blame-reveal-commit-display-faces display)
-                        fringe-face show-fringe nil sticky-indicator))))))
-    t))
+                        fringe-face show-fringe nil sticky-indicator)))))
+      t)))
 
 (defun blame-reveal--update-sticky-header ()
   "Update sticky header using in-place update for smooth transitions."

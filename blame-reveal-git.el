@@ -587,7 +587,7 @@ Returns alist of (COMMIT-HASH . INFO)."
 
 (defun blame-reveal--ensure-visible-commits-loaded ()
   "Ensure commit info is loaded for all visible commits (Optimized Batch Version)."
-  (when-let ((visible-commits (blame-reveal--get-visible-commits)))
+  (when-let* ((visible-commits (blame-reveal--get-visible-commits)))
     (let ((missing-commits
            (cl-remove-if (lambda (h)
                            (or (blame-reveal--is-uncommitted-p h)

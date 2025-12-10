@@ -197,7 +197,7 @@ Reuses existing overlays when possible to minimize visual disruption."
   (when (and blame-reveal--blame-data
              (buffer-file-name)
              (not (= (point-max) 1)))
-    (when-let ((range (blame-reveal--get-visible-line-range)))
+    (when-let* ((range (blame-reveal--get-visible-line-range)))
       (condition-case err
           (let* ((start-line (car range))
                  (end-line (cdr range))
@@ -303,7 +303,7 @@ Uses caching to avoid repeated searches within the same block."
                     (cached-commit (nth 1 blame-reveal--current-line-cache))
                     (cached-start (nth 2 blame-reveal--current-line-cache)))
                ;; Check if within the cached block range
-               (when-let ((entry (assoc line-num blame-reveal--blame-data)))
+               (when-let* ((entry (assoc line-num blame-reveal--blame-data)))
                  (equal (cdr entry) cached-commit))))
         ;; Cache hit, return directly.
         (cons (nth 1 blame-reveal--current-line-cache)
@@ -446,7 +446,7 @@ Uses in-place update for smooth transitions without flicker."
         (condition-case err
             (progn
               (when blame-reveal--blame-data-range
-                (when-let ((range (blame-reveal--get-visible-line-range)))
+                (when-let* ((range (blame-reveal--get-visible-line-range)))
                   (let ((start-line (car range))
                         (end-line (cdr range))
                         (current-start (car blame-reveal--blame-data-range))

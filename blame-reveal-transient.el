@@ -418,53 +418,26 @@ Now uses unified flicker-free system - no special handling needed."
    (lambda () (format "Color Scheme [H:%d°]"
                       (plist-get blame-reveal-color-scheme :hue)))
    ["Quick Presets"
-    ("1" "Blue" (lambda () (interactive) (blame-reveal--apply-color-preset 'blue)))
-    ("2" "Green" (lambda () (interactive) (blame-reveal--apply-color-preset 'green)))
-    ("3" "Purple" (lambda () (interactive) (blame-reveal--apply-color-preset 'purple)))
-    ("4" "Orange" (lambda () (interactive) (blame-reveal--apply-color-preset 'orange)))
-    ("5" "Subtle" (lambda () (interactive) (blame-reveal--apply-color-preset 'subtle)))
-    ("6" "Vivid" (lambda () (interactive) (blame-reveal--apply-color-preset 'vivid)))]
+    ("1" "Blue"   (lambda () (interactive) (blame-reveal--apply-color-preset 'blue))   :transient t)
+    ("2" "Green"  (lambda () (interactive) (blame-reveal--apply-color-preset 'green))  :transient t)
+    ("3" "Purple" (lambda () (interactive) (blame-reveal--apply-color-preset 'purple)) :transient t)
+    ("4" "Orange" (lambda () (interactive) (blame-reveal--apply-color-preset 'orange)) :transient t)
+    ("5" "Subtle" (lambda () (interactive) (blame-reveal--apply-color-preset 'subtle)) :transient t)
+    ("6" "Vivid"  (lambda () (interactive) (blame-reveal--apply-color-preset 'vivid))  :transient t)]
    ["Hue"
     ("h" "Hue (0-360)" blame-reveal--edit-hue)]
    ["Dark Theme"
-    ("n" "Newest" blame-reveal--edit-dark-newest)
-    ("o" "Oldest" blame-reveal--edit-dark-oldest)]
+    ("n" "Newest"      blame-reveal--edit-dark-newest)
+    ("o" "Oldest"      blame-reveal--edit-dark-oldest)]
    ["Light Theme"
-    ("N" "Newest" blame-reveal--edit-light-newest)
-    ("O" "Oldest" blame-reveal--edit-light-oldest)]
+    ("N" "Newest"      blame-reveal--edit-light-newest)
+    ("O" "Oldest"      blame-reveal--edit-light-oldest)]
    ["Saturation"
-    ("s" "Min" blame-reveal--edit-sat-min)
-    ("S" "Max" blame-reveal--edit-sat-max)]]
+    ("s" "Min"         blame-reveal--edit-sat-min)
+    ("S" "Max"         blame-reveal--edit-sat-max)]]
   [["Actions"
-    ("R" "Refresh" blame-reveal--full-update :transient t)
-    ("q" "Back" transient-quit-one)]])
-
-(transient-define-prefix blame-reveal-color-scheme-menu ()
-  "Configure color scheme."
-  [:description
-   (lambda () (format "Color Scheme [H:%d°]"
-                      (plist-get blame-reveal-color-scheme :hue)))
-   ["Quick Presets"
-    ("1" "Blue" (lambda () (interactive) (blame-reveal--apply-color-preset 'blue)))
-    ("2" "Green" (lambda () (interactive) (blame-reveal--apply-color-preset 'green)))
-    ("3" "Purple" (lambda () (interactive) (blame-reveal--apply-color-preset 'purple)))
-    ("4" "Orange" (lambda () (interactive) (blame-reveal--apply-color-preset 'orange)))
-    ("5" "Subtle" (lambda () (interactive) (blame-reveal--apply-color-preset 'subtle)))
-    ("6" "Vivid" (lambda () (interactive) (blame-reveal--apply-color-preset 'vivid)))]
-   ["Hue"
-    ("h" "Hue (0-360)" blame-reveal--edit-hue)]
-   ["Dark Theme"
-    ("n" "Newest" blame-reveal--edit-dark-newest)
-    ("o" "Oldest" blame-reveal--edit-dark-oldest)]
-   ["Light Theme"
-    ("N" "Newest" blame-reveal--edit-light-newest)
-    ("O" "Oldest" blame-reveal--edit-light-oldest)]
-   ["Saturation"
-    ("s" "Min" blame-reveal--edit-sat-min)
-    ("S" "Max" blame-reveal--edit-sat-max)]]
-  [["Actions"
-    ("R" "Refresh" blame-reveal--full-update :transient t)
-    ("q" "Back" transient-quit-one)]])
+    ("R" "Refresh"     blame-reveal--full-update :transient t)
+    ("q" "Back"        transient-quit-one)]])
 
 ;;; Options Infixes
 
@@ -561,10 +534,10 @@ Now uses unified flicker-free system - no special handling needed."
   "Transient menu for blame-reveal configuration."
   [:description blame-reveal--menu-title
    ["Display"
-    ("=" blame-reveal--toggle-scope)
+    ("="                   blame-reveal--toggle-scope)
     ("h" "Header style..." blame-reveal-header-style-menu)
-    ("f" "Fringe side..." blame-reveal-fringe-side-menu)
-    ("m" "Margin side..." blame-reveal-margin-side-menu)]
+    ("f" "Fringe side..."  blame-reveal-fringe-side-menu)
+    ("m" "Margin side..."  blame-reveal-margin-side-menu)]
    ["Colors"
     (blame-reveal--infix-days-limit)
     (blame-reveal--infix-gradient-quality)
@@ -577,11 +550,11 @@ Now uses unified flicker-free system - no special handling needed."
 
   ["Utilities"
    :pad-keys t
-   ("R" "Refresh" blame-reveal--full-update :transient t)
-   ("P" "Presets" blame-reveal-presets :transient t)
+   ("R" "Refresh"        blame-reveal--full-update     :transient t)
+   ("P" "Presets"        blame-reveal-presets          :transient t)
    ("?" "Auto calc info" blame-reveal-show-auto-calculation)
-   ("C" "Clear cache" blame-reveal-clear-auto-cache :transient t)
-   ("q" "Quit" transient-quit-one)])
+   ("C" "Clear cache"    blame-reveal-clear-auto-cache :transient t)
+   ("q" "Quit"           transient-quit-one)])
 
 (provide 'blame-reveal-transient)
 ;;; blame-reveal-transient.el ends here
