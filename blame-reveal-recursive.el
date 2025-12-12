@@ -622,25 +622,6 @@ Returns non-nil if action was executed, nil if stopped/cancelled."
          (when state (blame-reveal--restore-state state)))
        (signal (car err) (cdr err))))))
 
-(defun blame-reveal--restore-state (state-plist)
-  "Restore all blame-reveal internal variables from STATE-PLIST."
-  (setq blame-reveal--current-revision (plist-get state-plist :revision))
-  (setq blame-reveal--revision-display (plist-get state-plist :revision-display))
-  (setq blame-reveal--auto-days-cache nil) ; 始终重置或从 plist 中获取 (此处代码保持原样)
-  (setq blame-reveal--blame-data         (plist-get state-plist :blame-data))
-  (setq blame-reveal--blame-data-range   (plist-get state-plist :blame-data-range))
-  (setq blame-reveal--timestamps         (plist-get state-plist :timestamps))
-  (setq blame-reveal--recent-commits     (plist-get state-plist :recent-commits))
-
-  (setq blame-reveal--commit-info
-        (blame-reveal--ensure-hash-table (plist-get state-plist :commit-info)))
-  (setq blame-reveal--color-map
-        (blame-reveal--ensure-hash-table (plist-get state-plist :color-map)))
-  (setq blame-reveal--move-copy-metadata
-        (blame-reveal--ensure-hash-table (plist-get state-plist :move-copy-metadata)))
-
-  (or (plist-get state-plist :revision-display) "working tree"))
-
 ;;;###autoload
 (defun blame-reveal-blame-back ()
   "Go back to previous blame state in the recursion stack, without flashing."

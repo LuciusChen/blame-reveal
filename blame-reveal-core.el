@@ -39,9 +39,6 @@
 
 ;;; Buffer-Local State Variables
 
-(defvar-local blame-reveal--temp-overlay-timer nil
-  "Timer for delayed temp overlay rendering.")
-
 (defvar-local blame-reveal--current-block-commit nil
   "Commit hash of the currently highlighted block.")
 
@@ -59,9 +56,6 @@ Used to avoid unnecessary sticky header recreation when state hasn't changed.")
 (defvar-local blame-reveal--header-current-style nil
   "Current header style of the existing overlay.
 Used to detect style changes that require overlay rebuild.")
-
-(defvar-local blame-reveal--header-update-timer nil
-  "Timer for delayed header update.")
 
 (defvar-local blame-reveal--last-rendered-commit nil
   "Commit hash of the last rendered block (for smooth transition).")

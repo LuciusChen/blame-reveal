@@ -133,9 +133,7 @@ DOES NOT handle UI elements or application timers."
 (defun blame-reveal--state-error (error-msg)
   "Handle error with ERROR-MSG. Performs emergency UI cleanup defensively."
   (message "[State] Error: %s" error-msg)
-  (ignore-errors
-    (when (fboundp 'blame-reveal--cleanup-operation-ui-artifacts)
-      (blame-reveal--cleanup-operation-ui-artifacts)))
+  (ignore-errors (blame-reveal--clear-header))
 
   (blame-reveal--state-reset-internal)
   (setq blame-reveal--state-status 'error)

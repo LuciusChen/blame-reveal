@@ -206,9 +206,9 @@ Only applies when =recent-days-limit= is ='auto=:
      :color color)))
 
 ;; Apply it
-(setq blame-reveal-header-format-function #'my-minimal-header)
+(setq blame-reveal-block-format-function #'my-minimal-header)
 
-;; Default formatter is blame-reveal-format-header-default
+;; Default formatter is blame-reveal-format-block-default
 #+end_src
 
 *** Color Scheme

@@ -124,7 +124,7 @@ Quick start:
 Common customizations:
   - `blame-reveal-color-scheme': Change color scheme
   - `blame-reveal-recent-days-limit': How many days of commits to highlight
-  - `blame-reveal-header-format-function': Customize header display
+  - `blame-reveal-block-format-function': Customize header display
   - `blame-reveal-use-magit': Use magit for commit details
   - `blame-reveal-lazy-load-threshold': Lazy loading threshold
 
@@ -134,8 +134,8 @@ See all options: M-x customize-group RET blame-reveal"
 
 ;;; Header Customization
 
-(defcustom blame-reveal-header-format-function
-  #'blame-reveal-format-header-default
+(defcustom blame-reveal-block-format-function
+  #'blame-reveal-format-block-default
   "Function to format commit information for block-style header display.
 
 The function receives three arguments:
@@ -152,7 +152,7 @@ This format is ONLY used for block-style headers.
 Inline and margin styles have their own format functions.
 
 Example - Minimal single-line format:
-  (setq blame-reveal-header-format-function
+  (setq blame-reveal-block-format-function
     (lambda (commit-hash info color)
       (pcase-let ((=(,hash ,_author ,_date ,msg ,_ ,_) info))
         (make-blame-reveal-commit-display
@@ -161,7 +161,7 @@ Example - Minimal single-line format:
          :color color))))
 
 Example - Multi-line format with emphasis:
-  (setq blame-reveal-header-format-function
+  (setq blame-reveal-block-format-function
     (lambda (commit-hash info color)
       (pcase-let ((=(,hash ,author ,date ,msg ,_ ,_) info))
         (make-blame-reveal-commit-display
@@ -291,8 +291,7 @@ while the fringe shows visual age indicators."
                             (not (blame-reveal--is-margin-mode-p)))
                    (blame-reveal--ensure-window-margins))
                  ;; Refresh display using No-Flicker system
-                 (blame-reveal--clear-header-no-flicker)
-                 (blame-reveal--clear-sticky-header)
+                 (blame-reveal--clear-header)
                  (setq blame-reveal--last-rendered-commit nil)
                  (blame-reveal--update-header-impl))))))
   :group 'blame-reveal)
@@ -324,8 +323,7 @@ Only takes effect when header style is set to margin."
                  (blame-reveal--restore-window-margins)
                  (blame-reveal--ensure-window-margins)
                  ;; Refresh display using No-Flicker system
-                 (blame-reveal--clear-header-no-flicker)
-                 (blame-reveal--clear-sticky-header)
+                 (blame-reveal--clear-header)
                  (setq blame-reveal--last-rendered-commit nil)
                  (blame-reveal--update-header-impl))))))
   :group 'blame-reveal)
@@ -400,7 +398,7 @@ harder to distinguish visually."
 
 ;;; Uncommitted Changes Customization
 
-(defcustom blame-reveal-uncommitted-label "Uncommitted changes"
+(defcustom blame-reveal-uncommitted-label "Uncommitted"
   "Label to show for uncommitted changes."
   :type 'string
   :group 'blame-reveal)
@@ -578,13 +576,8 @@ For small files, sync loading is actually faster due to less overhead."
   "Force immediate header update without idle-timer delay.
 Used when settings change via transient menu."
   (when blame-reveal--blame-data
-    ;; Cancel any pending idle timer
-    (when blame-reveal--header-update-timer
-      (cancel-timer blame-reveal--header-update-timer)
-      (setq blame-reveal--header-update-timer nil))
     ;; Clear existing header (using flicker-free system)
-    (blame-reveal--clear-header-no-flicker)
-    (blame-reveal--clear-sticky-header-no-flicker)
+    (blame-reveal--clear-header)
     ;; Reset last rendered commit to force rebuild
     (setq blame-reveal--last-rendered-commit nil)
     (setq blame-reveal--sticky-header-state nil)
@@ -722,24 +715,16 @@ Handles Hooks, Timers, Overlays, and State."
   (remove-hook 'post-command-hook #'blame-reveal--update-header t)
   (remove-hook 'window-configuration-change-hook #'blame-reveal--render-visible-region t)
 
-  ;; Cancel All Timers (Using the helper from state or defining locally)
-  (blame-reveal--cleanup-operation-ui-artifacts)
-
   ;; Cancel State Machine (Stops async processes)
   (blame-reveal--state-cancel "mode disabled")
 
-  ;; Clean up flicker-free system
-  (when (fboundp 'blame-reveal--cleanup-no-flicker-system)
-    (blame-reveal--cleanup-no-flicker-system))
+  (setq blame-reveal--pending-delete-overlays nil)
 
   ;; Clean UI / Overlays
   (blame-reveal--restore-window-margins)
   (blame-reveal--clear-all-overlays) ; The unified registry clearer
   ;; Legacy/Specific UI cleanup
-  (when (bound-and-true-p blame-reveal--header-overlay)
-    (delete-overlay blame-reveal--header-overlay)
-    (setq blame-reveal--header-overlay nil))
-  (blame-reveal--clear-sticky-header)
+  (blame-reveal--clear-header)
   ;; Reset Cache & Variables
   (setq blame-reveal--auto-days-cache nil
         blame-reveal--blame-data-range nil
@@ -751,7 +736,6 @@ Handles Hooks, Timers, Overlays, and State."
         blame-reveal--current-revision nil
         blame-reveal--revision-display nil
         blame-reveal--header-current-style nil
-        blame-reveal--sticky-header-state nil
         ;; Critical: reset header throttling state
         blame-reveal--last-rendered-commit nil
         blame-reveal--last-update-line nil

@@ -364,16 +364,11 @@ Throttles updates to avoid excessive calls during rapid cursor movement."
                     (not (equal blame-reveal--last-update-line current-line))
                     (not (equal blame-reveal--last-rendered-commit commit-hash)))
 
-            (when blame-reveal--header-update-timer
-              (cancel-timer blame-reveal--header-update-timer)
-              (setq blame-reveal--header-update-timer nil))
-
-            (setq blame-reveal--header-update-timer
-                  (run-with-idle-timer
-                   blame-reveal--scroll-render-delay nil
-                   (lambda ()
-                     (setq blame-reveal--last-update-line current-line)
-                     (blame-reveal--update-header-impl))))))))))
+            (run-with-idle-timer
+             blame-reveal--scroll-render-delay nil
+             (lambda ()
+               (setq blame-reveal--last-update-line current-line)
+               (blame-reveal--update-header-impl)))))))))
 
 (defun blame-reveal--update-header-impl ()
   "Implementation of header update.
@@ -397,15 +392,12 @@ Uses in-place update for smooth transitions without flicker."
                  (need-update (or (not blame-reveal--header-overlay)
                                   (not (equal commit-hash blame-reveal--last-rendered-commit))
                                   style-changed)))
-            (when blame-reveal--temp-overlay-timer
-              (cancel-timer blame-reveal--temp-overlay-timer)
-              (setq blame-reveal--temp-overlay-timer nil))
 
             (when need-update
               (if (and blame-reveal--header-overlay
                        (not style-changed)
                        ;; Try in-place update first (no flicker)
-                       (blame-reveal--update-header-overlay-in-place
+                       (blame-reveal--ensure-header-overlay
                         blame-reveal--header-overlay
                         block-start commit-hash color hide-header-fringe))
                   ;; In-place update succeeded
@@ -420,18 +412,13 @@ Uses in-place update for smooth transitions without flicker."
 
             (when (or is-old-commit
                       (and is-uncommitted blame-reveal-show-uncommitted-fringe))
-              (setq blame-reveal--temp-overlay-timer
-                    (run-with-idle-timer
+              (run-with-idle-timer
                      blame-reveal-temp-overlay-delay nil
                      #'blame-reveal--temp-overlay-renderer
-                     (current-buffer) commit-hash color)))
+                     (current-buffer) commit-hash color))
             (setq blame-reveal--last-rendered-commit commit-hash)))
       ;; No current block - clear header
-      (when blame-reveal--temp-overlay-timer
-        (cancel-timer blame-reveal--temp-overlay-timer)
-        (setq blame-reveal--temp-overlay-timer nil))
-      (blame-reveal--clear-header-no-flicker)
-      (blame-reveal--clear-temp-overlays)
+      (blame-reveal--clear-header)
       (setq blame-reveal--current-block-commit nil)
       (setq blame-reveal--last-rendered-commit nil)
       (setq blame-reveal--header-current-style nil))
@@ -461,33 +448,21 @@ Uses in-place update for smooth transitions without flicker."
           (error
            (message "Error in scroll handler: %s" (error-message-string err))))))))
 
-(defun blame-reveal--on-scroll ()
-  "Handle scroll event with debouncing.
-Delays rendering until scrolling stops."
+(defun blame-reveal--scroll-handler (_win _start)
+  "Handle window scroll events with debouncing."
   (let ((current-start (window-start)))
     (unless (equal current-start blame-reveal--last-window-start)
       (setq blame-reveal--last-window-start current-start)
-      ;; Cancel previous timer
       (when blame-reveal--scroll-timer
         (cancel-timer blame-reveal--scroll-timer))
-      ;; Clear permanent fringe overlays
       (blame-reveal--clear-overlays-by-type 'fringe)
-      ;; CRITICAL FIX: Don't delete header during transient-setup
-      ;; Use No-Flicker system to prevent flash during scroll
       (unless blame-reveal--in-transient-setup
-        (blame-reveal--clear-header-no-flicker))
-      ;; Clear sticky header (also clears cached state)
-      (blame-reveal--clear-sticky-header)
-      ;; Set new timer with configured delay
+        (blame-reveal--clear-header))
       (setq blame-reveal--scroll-timer
             (run-with-idle-timer
              blame-reveal--scroll-render-delay nil
              #'blame-reveal--scroll-handler-impl
              (current-buffer))))))
-
-(defun blame-reveal--scroll-handler (_win _start)
-  "Handle window scroll events."
-  (blame-reveal--on-scroll))
 
 (defun blame-reveal--theme-change-handler ()
   "Handle theme change for all blame-reveal buffers.
@@ -510,9 +485,7 @@ Recalculates colors and refreshes all displays."
             (setq blame-reveal--current-block-commit nil)
             (setq blame-reveal--last-rendered-commit nil)
             ;; Clear existing header using No-Flicker system
-            (blame-reveal--clear-header-no-flicker)
-            ;; Clear sticky header state to force refresh
-            (blame-reveal--clear-sticky-header)
+            (blame-reveal--clear-header)
             ;; Clear temp overlays
             (blame-reveal--clear-temp-overlays)
             ;; Re-trigger header update
@@ -565,22 +538,6 @@ Recalculates colors and refreshes all displays."
     (when (timerp timer)
       (cancel-timer timer))
     (set timer-symbol nil)))
-
-
-(defun blame-reveal--cleanup-operation-ui-artifacts ()
-  "Cleanup UI elements and timers directly related to an active operation.
-Used for immediate aborts (error or cancel)."
-  (blame-reveal--stop-loading-animation)
-
-  (blame-reveal--safe-cancel-timer 'blame-reveal--temp-overlay-timer)
-  (blame-reveal--safe-cancel-timer 'blame-reveal--header-update-timer)
-
-  (ignore-errors
-    (when (bound-and-true-p blame-reveal--header-overlay)
-      (delete-overlay blame-reveal--header-overlay)
-      (setq blame-reveal--header-overlay nil))
-    (when (fboundp 'blame-reveal--clear-sticky-header)
-      (blame-reveal--clear-sticky-header))))
 
 (defun blame-reveal--full-update ()
   "Full update: reload blame data and render visible region."
