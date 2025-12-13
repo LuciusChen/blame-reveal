@@ -9,9 +9,11 @@
 ;;; Code:
 
 (require 'blame-reveal-core)
-(require 'blame-reveal-overlay)
+(require 'blame-reveal-ui)
 (require 'blame-reveal-color)
 (require 'cl-lib)
+
+;;; Time Formatting Constants
 
 (defconst blame-reveal--time-formats
   '(("year" . "y")

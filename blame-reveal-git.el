@@ -3,14 +3,11 @@
 ;;; Commentary:
 ;; Git command execution, blame data parsing, and commit info fetching.
 ;; Handles both synchronous and asynchronous loading strategies.
-;;
-;; REFACTORED VERSION - Unified data processing logic
 
 ;;; Code:
 
 (require 'vc-git)
 (require 'blame-reveal-core)
-(require 'blame-reveal-state)
 
 ;;; Git Command Building
 

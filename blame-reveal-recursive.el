@@ -25,7 +25,7 @@
 ;;; Code:
 
 (require 'blame-reveal)
-(require 'blame-reveal-overlay)
+(require 'blame-reveal-ui)
 (require 'cl-lib)
 
 ;;; Macros
