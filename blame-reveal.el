@@ -30,9 +30,8 @@
 ;; Common Customizations:
 ;;   (setq blame-reveal-recent-days-limit 'auto)      ; Smart time window
 ;;   (setq blame-reveal-gradient-quality 'auto)       ; Balanced quality
-;;   (setq blame-reveal-display-layout 'compact)      ; Header format
+;;   (setq blame-reveal-header-style 'block)          ; Header format
 ;;   (setq blame-reveal-color-scheme '(:hue 210 ...)) ; Color theme
-;;   (setq blame-reveal-move-copy-mode 'prompt)       ; Ask at boundaries
 ;;
 ;; See full documentation: https://github.com/lucius-chen/blame-reveal
 
