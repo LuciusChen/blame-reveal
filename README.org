@@ -1,214 +1,109 @@
 * blame-reveal.el
 
-Contextual, high-performance Git blame for Emacs with intelligent commit selection and recursive history navigation.
-
-** Philosophy
+Contextual Git blame for Emacs with smart commit selection, recursive history navigation, and focus mode.
 
 #+begin_quote
 Show only what matters—recent commits in visible lines.
 #+end_quote
 
-=blame-reveal= renders only the viewport with smart margins, ensuring instant activation and smooth scrolling even on 10k+ line files.
-
 [[file:assets/recent-commits.jpg]]
 
-[[file:assets/relatively-old-commits.jpg]]
+** Core Features
 
-Combined with [[https://github.com/dgutov/diff-hl][diff-hl]] for uncommitted changes:
+*** Smart Rendering
 
-[[file:assets/uncommit.jpg]]
+Only renders the viewport with margins, ensuring instant activation and smooth scrolling on large files (10k+ lines). Fringe colors follow IntelliJ IDEA style: newest commits are brightest.
 
-[[file:assets/sticky-header.jpg]]
+*** Three Header Styles
 
-** Features
+- =block= — Header above the first line of each commit block
+- =inline= — Compact header after the first line
+- =margin= — In left/right window margin (minimal intrusion)
 
-*** Smart Time-Based Selection
+*** Time-Based Commit Selection
 
-*Auto-calculation (default)*: Adapts to commit frequency and ensures good color distinction.
+=blame-reveal-recent-days-limit= controls which commits get colored:
 
-| Mode    | Commits | Color Step | Best For              |
-|---------+---------+------------+-----------------------|
-| strict  | 5-10    | 3-5%       | Many commits          |
-| auto    | 10-20   | 2-3%       | Balanced (recommended)|
-| relaxed | 15-30   | 1.5-2%     | Sparse commits        |
+| Value   | Behavior                                              |
+|---------+-------------------------------------------------------|
+| ='auto= | Adapts to commit density for optimal gradient quality |
+| number  | Fixed days (30, 90, 180, 365, etc.)                   |
+| =nil=   | All commits with relative coloring                    |
 
-*Fixed days*: =30=, =90=, =180=, =365=, or =nil= (all commits, relative coloring)
+*** Gradient Quality Control
 
-*** Visual Features
+When using ='auto= days limit, =blame-reveal-gradient-quality= tunes the balance:
 
-- Fringe colors with IntelliJ IDEA style gradient (newest = brightest)
-- Headers with customizable formatting and position
-- Sticky headers when scrolled off-screen
-- Theme-aware with smooth transitions
-- Overlay reuse minimizes flicker
-- *Smooth loading animation* with interpolated gradient trail (easter egg: see =blame-reveal-ui.el=)
+| Mode      | Commits | Color Step | Use Case          |
+|-----------+---------+------------+-------------------|
+| =strict=  | 5-10    | 3-5%       | Best distinction  |
+| =auto=    | 10-20   | 2-3%       | Balanced          |
+| =relaxed= | 15-30   | 1.5-2%     | More history      |
 
-*** Recursive Blame
+*** Recursive Blame & Focus Mode
 
-Navigate line history to find original authors:
-
-#+begin_example
-HEAD: Bob (def456)
-  ↓ Press 'b'
-def456^: Charlie (ghi789)
-  ↓ Press 'b'
-ghi789^: Dave (jkl012) ← Original author
-#+end_example
-
-*** Performance
-
-| Metric            | Value  |
-|-------------------+--------|
-| Initial load      | <100ms |
-| Scroll            | <50ms  |
-| Recursive blame   | <200ms |
-| Large files       | 10k+   |
-
-*** Commands
-
-| Key   | Action                  |
-|-------+-------------------------|
-| =q=     | Toggle mode             |
-| =c=     | Copy commit hash        |
-| =d=     | Show diff               |
-| =s=     | Show commit details     |
-| =h=     | File history            |
-| =l=     | Line history            |
-| =b=     | Blame at parent         |
-| =p= / =^= | Go back in stack        |
-| =g=     | Blame at revision       |
-| =r=     | Reset to HEAD           |
+Navigate line history through parent commits (=b=), or lock onto a single commit to see all its modifications across the file (=F=).
 
 ** Installation
 
 #+begin_src elisp
-;; Manual
-(add-to-list 'load-path "/path/to/blame-reveal")
-(require 'blame-reveal)
-(require 'blame-reveal-recursive)
-
-;; use-package
 (use-package blame-reveal
   :load-path "/path/to/blame-reveal"
   :commands blame-reveal-mode
   :config
-  (require 'blame-reveal-recursive))
+  ;; Optional: recursive blame and focus mode
+  (require 'blame-reveal-recursive)
+  (require 'blame-reveal-focus)
+  ;; Optional: transient menu (requires transient package)
+  (require 'blame-reveal-transient))
 #+end_src
 
 ** Quick Start
 
 #+begin_src elisp
-;; Enable in current buffer
 M-x blame-reveal-mode
-
-;; Or enable for all programming modes
-(add-hook 'prog-mode-hook #'blame-reveal-mode)
 #+end_src
+
+** Keybindings
+
+| Key   | Action                      |
+|-------+-----------------------------|
+| =q=   | Toggle mode                 |
+| =m=   | Open transient menu         |
+| =c=   | Copy commit hash            |
+| =d=   | Show commit diff            |
+| =s=   | Show commit details         |
+| =h=   | File history                |
+| =l=   | Line history                |
+| =b=   | Blame parent (recursive)    |
+| =p= / =^= | Go back in blame stack  |
+| =g=   | Blame at specific revision  |
+| =r=   | Reset to HEAD               |
+| =F=   | Toggle focus mode           |
+| =n= / =N= | Navigate focus blocks   |
 
 ** Configuration
 
 *** Recommended Setup
 
 #+begin_src elisp
-(use-package blame-reveal
-  :config
-  ;; Smart time-based selection
-  (setq blame-reveal-recent-days-limit 'auto)
-  (setq blame-reveal-gradient-quality 'auto)
-
-  ;; Display
-  (setq blame-reveal-header-style 'block)
-  (setq blame-reveal-show-uncommitted-fringe nil)  ; Use with diff-hl
-
-  ;; Performance
-  (setq blame-reveal-async-blame 'auto)
-  (setq blame-reveal-lazy-load-threshold 3000)
-
-  ;; Enable recursive blame
-  (require 'blame-reveal-recursive))
-#+end_src
-
-*** Understanding Colors
-
-See [[file:understanding-color-configuration.org][detailed color configuration guide]] for:
-- Three-step color pipeline
-- Auto-calculation algorithm
-- Configuration recipes
-
-Quick reference:
-#+begin_src elisp
-;; Smart defaults (recommended)
 (setq blame-reveal-recent-days-limit 'auto
-      blame-reveal-gradient-quality 'auto)
-
-;; Best clarity
-(setq blame-reveal-recent-days-limit 'auto
-      blame-reveal-gradient-quality 'strict)
-
-;; More history
-(setq blame-reveal-recent-days-limit 'auto
-      blame-reveal-gradient-quality 'relaxed)
+      blame-reveal-gradient-quality 'auto
+      blame-reveal-header-style 'block
+      blame-reveal-show-uncommitted-fringe nil)  ; Use with diff-hl
 #+end_src
 
-*** Time Selection
+*** Display Options
 
 #+begin_src elisp
-;; Auto (adapts to commit frequency)
-(setq blame-reveal-recent-days-limit 'auto)
-
-;; Fixed days
-(setq blame-reveal-recent-days-limit 30)    ; Last month
-(setq blame-reveal-recent-days-limit 90)    ; Last quarter
-(setq blame-reveal-recent-days-limit nil)   ; All commits
-#+end_src
-
-*** Quality Control
-
-Only applies when =recent-days-limit= is ='auto=:
-
-#+begin_src elisp
-(setq blame-reveal-gradient-quality 'strict)   ; 5-10 commits
-(setq blame-reveal-gradient-quality 'auto)     ; 10-20 commits
-(setq blame-reveal-gradient-quality 'relaxed)  ; 15-30 commits
-#+end_src
-
-*** Display
-
-#+begin_src elisp
-;; Header position
-(setq blame-reveal-header-style 'block)  ; Above first line
-(setq blame-reveal-header-style 'inline) ; Inline
-(setq blame-reveal-header-style 'margin) ; margin
+;; Header style
+(setq blame-reveal-header-style 'block)   ; or 'inline, 'margin
 
 ;; Fringe side
-(setq blame-reveal-fringe-side 'left-fringe)   ; Left (default)
-(setq blame-reveal-fringe-side 'right-fringe)  ; Right
+(setq blame-reveal-fringe-side 'left-fringe)  ; or 'right-fringe
 
-;; Margin side
-(setq blame-reveal-margin-side 'left)   ; Left (default)
-(setq blame-reveal-margin-side 'right)  ; Right
-
-;; Uncommitted changes
-(setq blame-reveal-show-uncommitted-fringe nil)   ; Use diff-hl
-(setq blame-reveal-uncommitted-label "Uncommitted changes")
-#+end_src
-
-*** Custom Header Formatter
-
-#+begin_src elisp
-;; Define custom formatter
-(defun my-minimal-header (commit-hash info color)
-  "Minimal: just hash and message"
-  (pcase-let ((`(,hash ,_author ,_date ,msg ,_ts ,_desc) info))
-    (make-blame-reveal-commit-display
-     :lines (list (format "%s: %s" hash msg))
-     :faces (list `(:foreground ,color :weight bold))
-     :color color)))
-
-;; Apply it
-(setq blame-reveal-block-format-function #'my-minimal-header)
-
-;; Default formatter is blame-reveal-format-block-default
+;; Margin side (when header-style is 'margin)
+(setq blame-reveal-margin-side 'left)  ; or 'right
 #+end_src
 
 *** Color Scheme
@@ -221,95 +116,84 @@ Only applies when =recent-days-limit= is ='auto=:
         :light-newest 0.45 :light-oldest 0.75
         :saturation-min 0.25 :saturation-max 0.60))
 
-;; Green
-(setq blame-reveal-color-scheme
-      '(:hue 120 :dark-newest 0.70 :dark-oldest 0.35
-        :light-newest 0.40 :light-oldest 0.75
-        :saturation-min 0.25 :saturation-max 0.60))
-
-;; High contrast
-(setq blame-reveal-color-scheme
-      '(:hue 210 :dark-newest 0.75 :dark-oldest 0.30
-        :light-newest 0.35 :light-oldest 0.85
-        :saturation-min 0.35 :saturation-max 0.70))
+;; Or use presets via transient menu: blue, green, purple, orange, subtle, vivid
 #+end_src
 
 *** Performance
 
 #+begin_src elisp
 ;; Async loading
-(setq blame-reveal-async-blame 'auto)  ; Auto (large files only)
-(setq blame-reveal-async-blame t)      ; Always
-(setq blame-reveal-async-blame nil)    ; Never
+(setq blame-reveal-async-blame 'auto)  ; 'auto, t, or nil
 
-;; Lazy loading threshold
-(setq blame-reveal-lazy-load-threshold 3000)  ; Lines
-
-;; Render margin
-(setq blame-reveal-render-margin 50)  ; Lines beyond viewport
+;; Lazy loading threshold (lines)
+(setq blame-reveal-lazy-load-threshold 3000)
 #+end_src
 
-*** Loading Animation (Easter Egg)
+*** Custom Formatters
 
-The loading animation uses smooth interpolation for a polished effect:
+Each header style has a customizable format function:
 
 #+begin_src elisp
-;; Animation speed (default: 0.08 seconds per frame)
-(setq blame-reveal-loading-animation-speed 0.08)
+;; Block header format
+(setq blame-reveal-block-format-function #'my-block-formatter)
 
-;; Frames per step (default: 4 frames for smooth interpolation)
-(setq blame-reveal-loading-animation-frames-per-step 4)
+;; Inline header format
+(setq blame-reveal-inline-format-function #'my-inline-formatter)
+
+;; Margin header format
+(setq blame-reveal-margin-format-function #'my-margin-formatter)
 #+end_src
 
-The animation creates a *gradient trail* that moves smoothly through the fringe:
-- 6 indicators with exponential decay
-- Sub-step interpolation between positions (0.0 → 1.0)
-- Dynamic color intensity based on distance from center
-- Seamless cycling using normalized offsets
+Format functions receive =(commit-hash commit-info color)= and return a =blame-reveal-commit-display= struct.
 
-See =blame-reveal--create-loading-animation= in =blame-reveal-ui.el= for implementation details. By default, use =blame-reveal-lazy-load-threshold= to determine whether to load asynchronously with animation, or force asynchronous loading to always have animation, or force synchronous loading to always.
+** Transient Menu
 
-** Debugging
+Press =m= in blame-reveal-mode to open the configuration menu:
+
+- Toggle settings in real-time
+- Switch header/fringe/margin styles
+- Adjust color scheme with presets or fine-tuning
+- Enable move/copy detection (=-M -C -C= flags)
+- View auto-calculation diagnostics
+
+** Modules
+
+| Module                    | Purpose                              |
+|---------------------------+--------------------------------------|
+| =blame-reveal=            | Main entry, mode definition          |
+| =blame-reveal-core=       | Data structures, state machine       |
+| =blame-reveal-git=        | Git operations, blame parsing        |
+| =blame-reveal-color=      | Color strategy, gradient calculation |
+| =blame-reveal-header=     | Header rendering (block/inline/margin) |
+| =blame-reveal-ui=         | Overlay management, animations       |
+| =blame-reveal-recursive=  | Recursive blame navigation           |
+| =blame-reveal-focus=      | Commit focus mode                    |
+| =blame-reveal-transient=  | Configuration menu                   |
+
+** Global Mode
+
+Enable automatically for all git-tracked files:
 
 #+begin_src elisp
-;; Show auto-calculation details
-M-x blame-reveal-show-auto-calculation
-
-;; Force recalculation
-M-x blame-reveal-clear-auto-cache
+(blame-reveal-global-mode 1)
 #+end_src
-
-** Architecture
-
-The codebase is modular with clear separation:
-
-| Module                   | Responsibility                     |
-|--------------------------+------------------------------------|
-| =blame-reveal-core=        | Data structures, buffer state      |
-| =blame-reveal-state=       | Async operation state machine      |
-| =blame-reveal-git=         | Git operations, blame parsing      |
-| =blame-reveal-overlay=     | Unified overlay management         |
-| =blame-reveal-color=       | Color strategy system              |
-| =blame-reveal-header=      | Header formatting                  |
-| =blame-reveal-ui=          | Rendering, scrolling, animations   |
-| =blame-reveal-commands=    | Interactive commands               |
-| =blame-reveal-recursive=   | Recursive blame navigation         |
 
 ** Troubleshooting
 
-| Issue                  | Solution                                      |
-|------------------------+-----------------------------------------------|
-| Colors too similar     | Use =strict= quality or fewer days            |
-| Too few/many commits   | Set fixed days or =nil= for all               |
-| Slow on large files    | Enable async: =(setq ... 'async-blame t)=     |
-| Scroll lag             | Lower =lazy-load-threshold=                   |
-| Wrong auto-calculation | =M-x blame-reveal-show-auto-calculation=      |
+| Issue               | Solution                               |
+|---------------------+----------------------------------------|
+| Colors too similar  | Use =strict= quality or fewer days     |
+| Too few commits     | Use =relaxed= or set fixed days        |
+| Slow on large files | Enable async: =(setq blame-reveal-async-blame t)= |
+| Scroll lag          | Lower =lazy-load-threshold=            |
+
+Use =M-x blame-reveal-show-auto-calculation= to see how the time window is computed.
 
 ** Requirements
 
 - Emacs 27.1+
 - Git CLI
-- Optional: Magit, diff-hl, nerd-icons
+- Optional: Magit, diff-hl, nerd-icons, transient
 
 ** License
 
