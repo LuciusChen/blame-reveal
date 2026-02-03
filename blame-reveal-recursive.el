@@ -217,7 +217,8 @@ Restores previous state and provides context-aware error messages."
          (is-initial (and base-commit
                           (blame-reveal--is-initial-commit-p base-commit)))
          (file-exists (and base-commit
-                           (blame-reveal--git-file-exists-p base-commit file))))
+                           (blame-reveal--git-file-exists-p base-commit file)))
+         (restore-failed nil))
     ;; First restore to previous state
     (condition-case restore-err
         (when blame-reveal--blame-stack
@@ -227,41 +228,41 @@ Restores previous state and provides context-aware error messages."
        (message "Failed to restore state: %s. Resetting to HEAD."
                 (error-message-string restore-err))
        (blame-reveal-reset-to-head)
-       (cl-return-from blame-reveal--handle-load-error nil)))
-    ;; Then provide context-aware error message
-    (unwind-protect
-        (cond
-         ;; Case 1: Initial commit
-         (is-initial
-          (blame-reveal--state-error
-           (format "Reached initial commit %s" (substring base-commit 0 8)))
-          (message "Reached initial commit %s - this is where the repository started"
-                   (substring base-commit 0 8)))
-
-         ;; Case 2: File doesn't exist at this revision
-         ((and base-commit (not file-exists))
-          (blame-reveal--state-error
-           (format "File doesn't exist at %s" (substring base-commit 0 8)))
-          (if blame-reveal--detect-moves
-              (message "File doesn't exist at commit %s" (substring base-commit 0 8))
-            (message "File doesn't exist at commit %s. Tip: Press [M] to enable move/copy detection"
-                     (substring base-commit 0 8))))
-         ;; Case 3: Other errors
-         (t
-          (blame-reveal--state-error (format "No blame data at %s" revision))
-          (if blame-reveal--detect-moves
-              (message "No blame data at revision %s" revision)
-            (message "No blame data at revision %s. Tip: Press [M] to enable move/copy detection"
-                     revision))))
-      ;; Ensure state is reset in all cases
-      (run-with-timer 0.2 nil
-                      (lambda ()
-                        (when (eq blame-reveal--state-status 'error)
-                          (setq blame-reveal--state-status 'idle
-                                blame-reveal--state-operation nil
-                                blame-reveal--state-mode nil
-                                blame-reveal--state-metadata nil
-                                blame-reveal--process-id nil)))))))
+       (setq restore-failed t)))
+    ;; Then provide context-aware error message (unless restore failed)
+    (unless restore-failed
+      (unwind-protect
+          (cond
+           ;; Case 1: Initial commit
+           (is-initial
+            (blame-reveal--state-error
+             (format "Reached initial commit %s" (substring base-commit 0 8)))
+            (message "Reached initial commit %s - this is where the repository started"
+                     (substring base-commit 0 8)))
+           ;; Case 2: File doesn't exist at this revision
+           ((and base-commit (not file-exists))
+            (blame-reveal--state-error
+             (format "File doesn't exist at %s" (substring base-commit 0 8)))
+            (if blame-reveal--detect-moves
+                (message "File doesn't exist at commit %s" (substring base-commit 0 8))
+              (message "File doesn't exist at commit %s. Tip: Press [M] to enable move/copy detection"
+                       (substring base-commit 0 8))))
+           ;; Case 3: Other errors
+           (t
+            (blame-reveal--state-error (format "No blame data at %s" revision))
+            (if blame-reveal--detect-moves
+                (message "No blame data at revision %s" revision)
+              (message "No blame data at revision %s. Tip: Press [M] to enable move/copy detection"
+                       revision))))
+        ;; Ensure state is reset in all cases
+        (run-with-timer 0.2 nil
+                        (lambda ()
+                          (when (eq blame-reveal--state-status 'error)
+                            (setq blame-reveal--state-status 'idle
+                                  blame-reveal--state-operation nil
+                                  blame-reveal--state-mode nil
+                                  blame-reveal--state-metadata nil
+                                  blame-reveal--process-id nil))))))))
 
 ;;; File Following
 
@@ -367,36 +368,35 @@ Returns the new buffer on success, nil on failure."
 
 (defun blame-reveal--handle-async-complete (temp-buffer revision file)
   "Handle completion of recursive async blame loading from TEMP-BUFFER."
-  (unless (and (eq blame-reveal--state-status 'loading)
-               (eq blame-reveal--state-operation 'recursive))
-    (message "[State] Unexpected recursive complete in state %s/%s"
-             blame-reveal--state-status blame-reveal--state-operation)
-    (when (buffer-live-p temp-buffer)
-      (kill-buffer temp-buffer))
-    (cl-return-from blame-reveal--handle-async-complete nil))
-
-  (unwind-protect
+  (if (not (and (eq blame-reveal--state-status 'loading)
+                (eq blame-reveal--state-operation 'recursive)))
+      (progn
+        (message "[State] Unexpected recursive complete in state %s/%s"
+                 blame-reveal--state-status blame-reveal--state-operation)
+        (when (buffer-live-p temp-buffer)
+          (kill-buffer temp-buffer)))
+    (unwind-protect
+        (when (buffer-live-p temp-buffer)
+          (condition-case err
+              (progn
+                (blame-reveal--state-transition 'processing)
+                (let* ((git-root (vc-git-root file))
+                       (relative-file (file-relative-name file git-root))
+                       (result (blame-reveal--parse-blame-output
+                                temp-buffer
+                                relative-file))
+                       (blame-data (car result))
+                       (move-metadata (cdr result)))
+                  (if blame-data
+                      (blame-reveal--finalize-load revision blame-data move-metadata)
+                    (blame-reveal--state-error "Failed to parse blame data")
+                    (blame-reveal--handle-load-error revision file))))
+            (error
+             (blame-reveal--state-error (format "Recursive load error: %s" (error-message-string err)))
+             (blame-reveal--handle-load-error revision file))))
+      ;; Always clean up temp buffer
       (when (buffer-live-p temp-buffer)
-        (condition-case err
-            (progn
-              (blame-reveal--state-transition 'processing)
-              (let* ((git-root (vc-git-root file))
-                     (relative-file (file-relative-name file git-root))
-                     (result (blame-reveal--parse-blame-output
-                              temp-buffer
-                              relative-file))
-                     (blame-data (car result))
-                     (move-metadata (cdr result)))
-                (if blame-data
-                    (blame-reveal--finalize-load revision blame-data move-metadata)
-                  (blame-reveal--state-error "Failed to parse blame data")
-                  (blame-reveal--handle-load-error revision file))))
-          (error
-           (blame-reveal--state-error (format "Recursive load error: %s" (error-message-string err)))
-           (blame-reveal--handle-load-error revision file))))
-    ;; Always clean up temp buffer
-    (when (buffer-live-p temp-buffer)
-      (kill-buffer temp-buffer))))
+        (kill-buffer temp-buffer)))))
 
 ;;; Synchronous Loading
 

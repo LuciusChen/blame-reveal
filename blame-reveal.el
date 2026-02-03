@@ -822,7 +822,7 @@ Uses magit if `blame-reveal-use-magit' is configured to do so."
   "Show the git log history of current file.
 Uses magit if `blame-reveal-use-magit' is configured to do so."
   (interactive)
-  (if-let ((file (buffer-file-name)))
+  (if-let* ((file (buffer-file-name)))
       (if (vc-git-registered file)
           (if (blame-reveal--should-use-magit-p)
               (magit-log-buffer-file)
@@ -851,7 +851,7 @@ Uses magit if `blame-reveal-use-magit' is configured to do so."
   "Show the git log history of current line.
 This function always uses built-in git."
   (interactive)
-  (if-let ((file (buffer-file-name)))
+  (if-let* ((file (buffer-file-name)))
       (if (vc-git-registered file)
           (let* ((line-num (line-number-at-pos))
                  (buffer-name (format "*Git Log: %s:%d*"

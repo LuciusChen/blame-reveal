@@ -96,20 +96,17 @@ START-LINE and END-LINE are optional (nil for full file).
 Returns (BLAME-DATA . MOVE-METADATA) on success, nil on failure."
   (let* ((file (buffer-file-name))
          (git-root (and file (vc-git-root file))))
-    (unless (and file git-root (vc-git-registered file))
-      (cl-return-from blame-reveal--call-git-blame-sync nil))
-
-    (let ((default-directory git-root)
-          (relative-file (file-relative-name file git-root))
-          (process-environment (cons "GIT_PAGER=cat"
-                                    (cons "PAGER=cat"
-                                          process-environment))))
-      (with-temp-buffer
-        (let ((args (blame-reveal--build-blame-command-args
-                    start-line end-line relative-file)))
-          (if (zerop (apply #'call-process "git" nil t nil args))
-              (blame-reveal--parse-blame-output (current-buffer) relative-file)
-            nil))))))
+    (when (and file git-root (vc-git-registered file))
+      (let ((default-directory git-root)
+            (relative-file (file-relative-name file git-root))
+            (process-environment (cons "GIT_PAGER=cat"
+                                       (cons "PAGER=cat"
+                                             process-environment))))
+        (with-temp-buffer
+          (let ((args (blame-reveal--build-blame-command-args
+                       start-line end-line relative-file)))
+            (when (zerop (apply #'call-process "git" nil t nil args))
+              (blame-reveal--parse-blame-output (current-buffer) relative-file))))))))
 
 ;;; Blame Data Parsing
 
@@ -207,91 +204,95 @@ Returns (BLAME-DATA . MOVE-METADATA) where:
 
 (defun blame-reveal--load-blame-data-sync ()
   "Load git blame data synchronously (REFACTORED)."
-  (unless (blame-reveal--state-start 'initial 'sync)
-    (cl-return-from blame-reveal--load-blame-data-sync nil))
+  (when (blame-reveal--state-start 'initial 'sync)
+    (run-hooks 'blame-reveal-before-load-hook)
+    (condition-case err
+        (let* ((file (buffer-file-name))
+               (git-root (and file (vc-git-root file))))
+          (if (null git-root)
+              (blame-reveal--state-error "Not in git repository")
+            (let* ((use-lazy (blame-reveal--should-lazy-load-p))
+                   (range (when use-lazy (blame-reveal--get-visible-line-range)))
+                   (use-lazy-effective (and use-lazy range))
+                   (result (if use-lazy-effective
+                               (blame-reveal--call-git-blame-sync (car range) (cdr range))
+                             (blame-reveal--call-git-blame-sync nil nil))))
+              (blame-reveal--state-transition 'loading)
+              (if-let* ((blame-data (blame-reveal--process-blame-result result use-lazy-effective range)))
+                  (progn
+                    (blame-reveal--state-transition 'processing)
+                    (run-hook-with-args 'blame-reveal-after-load-hook (length blame-data))
+                    (blame-reveal--state-transition 'rendering)
+                    (blame-reveal--render-visible-region)
+                    (blame-reveal--state-complete))
+                (blame-reveal--state-error "No git blame data available")))))
+      (error
+       (blame-reveal--state-error (error-message-string err))
+       nil))))
 
-  (run-hooks 'blame-reveal-before-load-hook)
+(defun blame-reveal--merge-new-blame-entries (new-data)
+  "Merge NEW-DATA into blame-reveal--blame-data.
+Returns the count of added entries."
+  (let ((existing-lines (make-hash-table :test 'equal))
+        (added-count 0))
+    (dolist (entry blame-reveal--blame-data)
+      (puthash (car entry) t existing-lines))
+    (dolist (entry new-data)
+      (unless (gethash (car entry) existing-lines)
+        (push entry blame-reveal--blame-data)
+        (cl-incf added-count)))
+    (when (> added-count 0)
+      (setq blame-reveal--blame-data
+            (sort blame-reveal--blame-data
+                  (lambda (a b) (< (car a) (car b))))))
+    added-count))
 
-  (condition-case err
-      (let* ((file (buffer-file-name))
-             (git-root (and file (vc-git-root file))))
-        (unless git-root
-          (blame-reveal--state-error "Not in git repository")
-          (cl-return-from blame-reveal--load-blame-data-sync nil))
+(defun blame-reveal--update-blame-data-range (start-line end-line)
+  "Update blame-reveal--blame-data-range to include START-LINE to END-LINE."
+  (setq blame-reveal--blame-data-range
+        (if blame-reveal--blame-data-range
+            (cons (min start-line (car blame-reveal--blame-data-range))
+                  (max end-line (cdr blame-reveal--blame-data-range)))
+          (cons start-line end-line))))
 
-        (let* ((use-lazy (blame-reveal--should-lazy-load-p))
-               (range (when use-lazy (blame-reveal--get-visible-line-range)))
-               ;; Only use lazy if we actually got a valid range
-               (use-lazy-effective (and use-lazy range))
-               (result (if use-lazy-effective
-                          (blame-reveal--call-git-blame-sync (car range) (cdr range))
-                        (blame-reveal--call-git-blame-sync nil nil))))
-
-          (blame-reveal--state-transition 'loading)
-
-          (if-let ((blame-data (blame-reveal--process-blame-result result use-lazy-effective range)))
-              (progn
-                (blame-reveal--state-transition 'processing)
-                (run-hook-with-args 'blame-reveal-after-load-hook (length blame-data))
-                (blame-reveal--state-transition 'rendering)
-                (blame-reveal--render-visible-region)
-                (blame-reveal--state-complete))
-            (blame-reveal--state-error "No git blame data available"))))
-    (error
-     (blame-reveal--state-error (error-message-string err))
-     nil)))
+(defun blame-reveal--finalize-expansion (start-line end-line added-count sync-p)
+  "Finalize blame expansion with START-LINE, END-LINE, ADDED-COUNT.
+SYNC-P indicates whether this is synchronous expansion."
+  (blame-reveal--update-blame-data-range start-line end-line)
+  (mapc #'blame-reveal--ensure-commit-info (blame-reveal--get-visible-commits))
+  (blame-reveal--update-recent-commits)
+  (blame-reveal--state-transition 'rendering)
+  (blame-reveal--render-expanded-region start-line end-line)
+  (let ((current-line (line-number-at-pos)))
+    (when (and (>= current-line start-line)
+               (<= current-line end-line))
+      (blame-reveal--update-header)))
+  (message "Blame expanded%s: +%d lines (total %d)"
+           (if sync-p " (sync)" "")
+           added-count
+           (length blame-reveal--blame-data)))
 
 (defun blame-reveal--expand-blame-data-sync (start-line end-line)
-  "Synchronously expand blame data to include START-LINE to END-LINE (REFACTORED)."
-  (unless (blame-reveal--state-start 'expansion 'sync
-                                     (list :start-line start-line
-                                           :end-line end-line))
-    (cl-return-from blame-reveal--expand-blame-data-sync nil))
-  (condition-case err
-      (let* ((result (blame-reveal--get-blame-data-range start-line end-line))
-             (new-data (car result))
-             (move-metadata (cdr result)))
-        (if (null new-data)
-            (progn
-              (message "No new blame data in range %d-%d" start-line end-line)
-              (blame-reveal--state-complete))
-          (blame-reveal--state-transition 'processing)
-          ;; REFACTORED: Use unified metadata merger
-          (blame-reveal--merge-move-copy-metadata move-metadata)
-          (let ((existing-lines (make-hash-table :test 'equal))
-                (added-count 0))
-            (dolist (entry blame-reveal--blame-data)
-              (puthash (car entry) t existing-lines))
-            (dolist (entry new-data)
-              (unless (gethash (car entry) existing-lines)
-                (push entry blame-reveal--blame-data)
-                (setq added-count (1+ added-count))))
-            (when (> added-count 0)
-              (setq blame-reveal--blame-data
-                    (sort blame-reveal--blame-data
-                          (lambda (a b) (< (car a) (car b)))))
-              (if blame-reveal--blame-data-range
-                  (setq blame-reveal--blame-data-range
-                        (cons (min start-line (car blame-reveal--blame-data-range))
-                              (max end-line (cdr blame-reveal--blame-data-range))))
-                (setq blame-reveal--blame-data-range
-                      (cons start-line end-line)))
-              (let ((visible-commits (blame-reveal--get-visible-commits)))
-                (dolist (commit visible-commits)
-                  (blame-reveal--ensure-commit-info commit)))
-              (blame-reveal--update-recent-commits)
-              (blame-reveal--state-transition 'rendering)
-              (blame-reveal--render-expanded-region start-line end-line)
-              (let ((current-line (line-number-at-pos)))
-                (when (and (>= current-line start-line)
-                           (<= current-line end-line))
-                  (blame-reveal--update-header)))
-              (message "Blame expanded (sync): +%d lines (total %d)"
-                       added-count (length blame-reveal--blame-data)))))
-        (blame-reveal--state-complete))
-    (error
-     (blame-reveal--state-error (error-message-string err))
-     nil)))
+  "Synchronously expand blame data to include START-LINE to END-LINE."
+  (when (blame-reveal--state-start 'expansion 'sync
+                                   (list :start-line start-line
+                                         :end-line end-line))
+    (condition-case err
+        (pcase-let* ((`(,new-data . ,move-metadata)
+                      (blame-reveal--get-blame-data-range start-line end-line)))
+          (if (null new-data)
+              (progn
+                (message "No new blame data in range %d-%d" start-line end-line)
+                (blame-reveal--state-complete))
+            (blame-reveal--state-transition 'processing)
+            (blame-reveal--merge-move-copy-metadata move-metadata)
+            (let ((added-count (blame-reveal--merge-new-blame-entries new-data)))
+              (when (> added-count 0)
+                (blame-reveal--finalize-expansion start-line end-line added-count t)))
+            (blame-reveal--state-complete)))
+      (error
+       (blame-reveal--state-error (error-message-string err))
+       nil))))
 
 ;;; Asynchronous Loading
 
@@ -366,142 +367,141 @@ Returns (BLAME-DATA . MOVE-METADATA) where:
          (range (when use-lazy (blame-reveal--get-visible-line-range)))
          (start-line (when range (car range)))
          (end-line (when range (cdr range))))
-    (unless (blame-reveal--state-start 'initial 'async
-                                       (if (and start-line end-line)
-                                           (list :start-line start-line
-                                                 :end-line end-line
-                                                 :use-lazy t)
-                                         (list :use-lazy nil)))
-      (cl-return-from blame-reveal--load-blame-data-async nil))
-    (if use-lazy
+    (when (blame-reveal--state-start 'initial 'async
+                                     (if (and start-line end-line)
+                                         (list :start-line start-line
+                                               :end-line end-line
+                                               :use-lazy t)
+                                       (list :use-lazy nil)))
+      (if use-lazy
+          (if blame-reveal--detect-moves
+              (message "Loading git blame with M/C detection: lines %d-%d..." start-line end-line)
+            (message "Loading git blame (async, lazy): lines %d-%d..." start-line end-line))
         (if blame-reveal--detect-moves
-            (message "Loading git blame with M/C detection: lines %d-%d..." start-line end-line)
-          (message "Loading git blame (async, lazy): lines %d-%d..." start-line end-line))
-      (if blame-reveal--detect-moves
-          (message "Loading git blame with M/C detection...")
-        (message "Loading git blame (async, full)...")))
+            (message "Loading git blame with M/C detection...")
+          (message "Loading git blame (async, full)...")))
+      (blame-reveal--start-async-blame
+       start-line
+       end-line
+       (lambda (temp-buffer)
+         (blame-reveal--handle-initial-load-complete temp-buffer))))))
+
+(defun blame-reveal--handle-initial-load-complete (temp-buffer)
+  "Handle completion of initial async blame loading from TEMP-BUFFER."
+  (if (not (eq blame-reveal--state-status 'loading))
+      (progn
+        (message "[State] Unexpected complete in state %s" blame-reveal--state-status)
+        (when (buffer-live-p temp-buffer)
+          (kill-buffer temp-buffer)))
+    (unwind-protect
+        (when (buffer-live-p temp-buffer)
+          (condition-case err
+              (progn
+                (blame-reveal--state-transition 'processing)
+                (let* ((file (buffer-file-name))
+                       (git-root (vc-git-root file))
+                       (relative-file (file-relative-name file git-root))
+                       (result (blame-reveal--parse-blame-output
+                                temp-buffer
+                                relative-file))
+                       (use-lazy (plist-get blame-reveal--state-metadata :use-lazy))
+                       (range-info (when use-lazy
+                                     (cons (plist-get blame-reveal--state-metadata :start-line)
+                                           (plist-get blame-reveal--state-metadata :end-line)))))
+                  (if-let* ((blame-data
+                             (blame-reveal--process-blame-result
+                              result use-lazy range-info)))
+                      (progn
+                        (run-hook-with-args 'blame-reveal-after-load-hook (length blame-data))
+                        (blame-reveal--state-transition 'rendering)
+                        (blame-reveal--load-commits-incrementally)
+                        (blame-reveal--render-visible-region)
+                        (blame-reveal--state-complete))
+                    (blame-reveal--state-error "No git blame data available"))))
+            (error
+             (blame-reveal--state-error (format "Parse error: %s" (error-message-string err))))))
+      (when (buffer-live-p temp-buffer)
+        (kill-buffer temp-buffer)))))
+
+(defun blame-reveal--expand-blame-data-async (start-line end-line)
+  "Asynchronously expand blame data to include START-LINE to END-LINE."
+  (when (blame-reveal--state-start 'expansion 'async
+                                   (list :start-line start-line
+                                         :end-line end-line))
     (blame-reveal--start-async-blame
      start-line
      end-line
      (lambda (temp-buffer)
-       (blame-reveal--handle-initial-load-complete temp-buffer)))))
+       (blame-reveal--handle-expansion-complete temp-buffer start-line end-line)))))
 
-(defun blame-reveal--handle-initial-load-complete (temp-buffer)
-  "Handle completion of initial async blame loading from TEMP-BUFFER."
-  (unless (eq blame-reveal--state-status 'loading)
-    (message "[State] Unexpected complete in state %s" blame-reveal--state-status)
-    (when (buffer-live-p temp-buffer)
-      (kill-buffer temp-buffer))
-    (cl-return-from blame-reveal--handle-initial-load-complete nil))
+(defun blame-reveal--merge-new-blame-entries-with-commits (new-data)
+  "Merge NEW-DATA into blame-reveal--blame-data, tracking new commits.
+Returns (ADDED-COUNT . NEW-COMMITS-HASH-TABLE)."
+  (let ((existing-lines (make-hash-table :test 'equal))
+        (new-commits (make-hash-table :test 'equal))
+        (added-count 0))
+    (dolist (entry blame-reveal--blame-data)
+      (puthash (car entry) t existing-lines))
+    (dolist (entry new-data)
+      (unless (gethash (car entry) existing-lines)
+        (push entry blame-reveal--blame-data)
+        (cl-incf added-count)
+        (puthash (cdr entry) t new-commits)))
+    (when (> added-count 0)
+      (setq blame-reveal--blame-data
+            (sort blame-reveal--blame-data
+                  (lambda (a b) (< (car a) (car b))))))
+    (cons added-count new-commits)))
 
-  (unwind-protect
-      (when (buffer-live-p temp-buffer)
-        (condition-case err
-            (progn
-              (blame-reveal--state-transition 'processing)
-              (let* ((file (buffer-file-name))
-                     (git-root (vc-git-root file))
-                     (relative-file (file-relative-name file git-root))
-                     (result (blame-reveal--parse-blame-output
-                              temp-buffer
-                              relative-file))
-                     (use-lazy (plist-get blame-reveal--state-metadata :use-lazy))
-                     (range-info (when use-lazy
-                                   (cons (plist-get blame-reveal--state-metadata :start-line)
-                                         (plist-get blame-reveal--state-metadata :end-line)))))
-
-                (if-let ((blame-data
-                         (blame-reveal--process-blame-result
-                          result use-lazy range-info)))
-                    (progn
-                      (run-hook-with-args 'blame-reveal-after-load-hook (length blame-data))
-                      (blame-reveal--state-transition 'rendering)
-                      (blame-reveal--load-commits-incrementally)
-                      (blame-reveal--render-visible-region)
-                      (blame-reveal--state-complete))
-                  (blame-reveal--state-error "No git blame data available"))))
-          (error
-           (blame-reveal--state-error (format "Parse error: %s" (error-message-string err))))))
-    (when (buffer-live-p temp-buffer)
-      (kill-buffer temp-buffer))))
-
-(defun blame-reveal--expand-blame-data-async (start-line end-line)
-  "Asynchronously expand blame data to include START-LINE to END-LINE."
-  (unless (blame-reveal--state-start 'expansion 'async
-                                     (list :start-line start-line
-                                           :end-line end-line))
-    (cl-return-from blame-reveal--expand-blame-data-async nil))
-  (blame-reveal--start-async-blame
-   start-line
-   end-line
-   (lambda (temp-buffer)
-     (blame-reveal--handle-expansion-complete temp-buffer start-line end-line))))
+(defun blame-reveal--process-expansion-result (temp-buffer start-line end-line)
+  "Process expansion result from TEMP-BUFFER for START-LINE to END-LINE.
+Returns t on success, nil on failure."
+  (let* ((file (buffer-file-name))
+         (git-root (vc-git-root file))
+         (relative-file (file-relative-name file git-root)))
+    (pcase-let* ((`(,new-data . ,move-metadata)
+                  (blame-reveal--parse-blame-output temp-buffer relative-file)))
+      (if (null new-data)
+          (progn
+            (message "No new blame data in range %d-%d" start-line end-line)
+            (blame-reveal--state-complete)
+            nil)
+        (blame-reveal--merge-move-copy-metadata move-metadata)
+        (pcase-let* ((`(,added-count . ,new-commits)
+                      (blame-reveal--merge-new-blame-entries-with-commits new-data)))
+          (when (> added-count 0)
+            (blame-reveal--update-blame-data-range start-line end-line)
+            (maphash (lambda (commit _) (blame-reveal--ensure-commit-info commit))
+                     new-commits)
+            (blame-reveal--update-recent-commits)
+            (blame-reveal--state-transition 'rendering)
+            (blame-reveal--render-expanded-region start-line end-line)
+            (let ((current-line (line-number-at-pos)))
+              (when (and (>= current-line start-line)
+                         (<= current-line end-line))
+                (blame-reveal--update-header)))
+            (message "Blame expanded: +%d lines (total %d)"
+                     added-count (length blame-reveal--blame-data))))
+        (blame-reveal--state-complete)
+        t))))
 
 (defun blame-reveal--handle-expansion-complete (temp-buffer start-line end-line)
-  "Handle completion of async blame expansion from TEMP-BUFFER (REFACTORED)."
-  (unless (eq blame-reveal--state-status 'loading)
-    (message "[State] Unexpected complete in state %s" blame-reveal--state-status)
-    (when (buffer-live-p temp-buffer)
-      (kill-buffer temp-buffer))
-    (cl-return-from blame-reveal--handle-expansion-complete nil))
-
-  (unwind-protect
+  "Handle completion of async blame expansion from TEMP-BUFFER."
+  (if (not (eq blame-reveal--state-status 'loading))
+      (progn
+        (message "[State] Unexpected complete in state %s" blame-reveal--state-status)
+        (when (buffer-live-p temp-buffer)
+          (kill-buffer temp-buffer)))
+    (unwind-protect
+        (when (buffer-live-p temp-buffer)
+          (condition-case err
+              (progn
+                (blame-reveal--state-transition 'processing)
+                (blame-reveal--process-expansion-result temp-buffer start-line end-line))
+            (error
+             (blame-reveal--state-error (format "Expansion error: %s" (error-message-string err))))))
       (when (buffer-live-p temp-buffer)
-        (condition-case err
-            (progn
-              (blame-reveal--state-transition 'processing)
-              (let* ((file (buffer-file-name))
-                     (git-root (vc-git-root file))
-                     (relative-file (file-relative-name file git-root))
-                     (result (blame-reveal--parse-blame-output
-                              temp-buffer
-                              relative-file))
-                     (new-data (car result))
-                     (move-metadata (cdr result)))
-                (if (null new-data)
-                    (progn
-                      (message "No new blame data in range %d-%d" start-line end-line)
-                      (blame-reveal--state-complete))
-                  ;; REFACTORED: Use unified metadata merger
-                  (blame-reveal--merge-move-copy-metadata move-metadata)
-                  (let ((existing-lines (make-hash-table :test 'equal))
-                        (added-count 0)
-                        (new-commits (make-hash-table :test 'equal)))
-                    (dolist (entry blame-reveal--blame-data)
-                      (puthash (car entry) t existing-lines))
-                    (dolist (entry new-data)
-                      (unless (gethash (car entry) existing-lines)
-                        (push entry blame-reveal--blame-data)
-                        (setq added-count (1+ added-count))
-                        (puthash (cdr entry) t new-commits)))
-                    (when (> added-count 0)
-                      (setq blame-reveal--blame-data
-                            (sort blame-reveal--blame-data
-                                  (lambda (a b) (< (car a) (car b)))))
-                      (if blame-reveal--blame-data-range
-                          (setq blame-reveal--blame-data-range
-                                (cons (min start-line (car blame-reveal--blame-data-range))
-                                      (max end-line (cdr blame-reveal--blame-data-range))))
-                        (setq blame-reveal--blame-data-range
-                              (cons start-line end-line)))
-                      (maphash (lambda (commit _)
-                                 (blame-reveal--ensure-commit-info commit))
-                               new-commits)
-                      (blame-reveal--update-recent-commits)
-                      (blame-reveal--state-transition 'rendering)
-                      (blame-reveal--render-expanded-region start-line end-line)
-                      (let ((current-line (line-number-at-pos)))
-                        (when (and (>= current-line start-line)
-                                   (<= current-line end-line))
-                          (blame-reveal--update-header)))
-                      (message "Blame expanded: +%d lines (total %d)"
-                               added-count (length blame-reveal--blame-data)))))
-                (blame-reveal--state-complete)))
-          (error
-           (blame-reveal--state-error (format "Expansion error: %s" (error-message-string err))))))
-    ;; Always clean up temp buffer
-    (when (buffer-live-p temp-buffer)
-      (kill-buffer temp-buffer))))
+        (kill-buffer temp-buffer)))))
 
 ;;; Commit Info
 
@@ -554,21 +554,23 @@ Returns alist of (COMMIT-HASH . INFO)."
                           results)))))
             (nreverse results)))))))
 
+(defun blame-reveal--update-timestamp-range (timestamp)
+  "Update blame-reveal--timestamps range with TIMESTAMP."
+  (unless blame-reveal--timestamps
+    (setq blame-reveal--timestamps (cons timestamp timestamp)))
+  (setcar blame-reveal--timestamps
+          (min (car blame-reveal--timestamps) timestamp))
+  (setcdr blame-reveal--timestamps
+          (max (cdr blame-reveal--timestamps) timestamp)))
+
 (defun blame-reveal--ensure-commit-info (commit-hash)
   "Ensure commit info is loaded for COMMIT-HASH."
   (unless (or (blame-reveal--is-uncommitted-p commit-hash)
               (gethash commit-hash blame-reveal--commit-info))
-    (let ((info (blame-reveal--get-commit-info commit-hash)))
-      (when info
-        (puthash commit-hash info blame-reveal--commit-info)
-        (let ((timestamp (nth 4 info)))
-          (when timestamp
-            (unless blame-reveal--timestamps
-              (setq blame-reveal--timestamps (cons timestamp timestamp)))
-            (setcar blame-reveal--timestamps
-                    (min (car blame-reveal--timestamps) timestamp))
-            (setcdr blame-reveal--timestamps
-                    (max (cdr blame-reveal--timestamps) timestamp))))))))
+    (when-let* ((info (blame-reveal--get-commit-info commit-hash)))
+      (puthash commit-hash info blame-reveal--commit-info)
+      (when-let* ((timestamp (nth 4 info)))
+        (blame-reveal--update-timestamp-range timestamp)))))
 
 (defsubst blame-reveal--get-visible-commits ()
   "Get list of commit hashes in visible area."
@@ -582,6 +584,15 @@ Returns alist of (COMMIT-HASH . INFO)."
                             end-line)))
       (mapcar #'cadr visible-blocks))))
 
+(defun blame-reveal--store-commit-info-entry (entry)
+  "Store a single commit info ENTRY into cache and update timestamps.
+ENTRY is (HASH . INFO) from batch results."
+  (pcase-let* ((`(,hash . ,info) entry)
+               (timestamp (nth 4 info)))
+    (puthash hash info blame-reveal--commit-info)
+    (when timestamp
+      (blame-reveal--update-timestamp-range timestamp))))
+
 (defun blame-reveal--ensure-visible-commits-loaded ()
   "Ensure commit info is loaded for all visible commits (Optimized Batch Version)."
   (when-let* ((visible-commits (blame-reveal--get-visible-commits)))
@@ -590,20 +601,9 @@ Returns alist of (COMMIT-HASH . INFO)."
                            (or (blame-reveal--is-uncommitted-p h)
                                (gethash h blame-reveal--commit-info)))
                          visible-commits)))
-      (when missing-commits
-        (let ((batch-results (blame-reveal--get-commits-info-batch missing-commits)))
-          (dolist (entry batch-results)
-            (let* ((hash (car entry))
-                   (info (cdr entry))
-                   (timestamp (nth 4 info)))
-              (puthash hash info blame-reveal--commit-info)
-              (when timestamp
-                (unless blame-reveal--timestamps
-                  (setq blame-reveal--timestamps (cons timestamp timestamp)))
-                (setcar blame-reveal--timestamps
-                        (min (car blame-reveal--timestamps) timestamp))
-                (setcdr blame-reveal--timestamps
-                        (max (cdr blame-reveal--timestamps) timestamp)))))))
+      (when-let* ((batch-results (and missing-commits
+                                      (blame-reveal--get-commits-info-batch missing-commits))))
+        (mapc #'blame-reveal--store-commit-info-entry batch-results))
       (blame-reveal--update-recent-commits))))
 
 (defun blame-reveal--load-commits-incrementally ()

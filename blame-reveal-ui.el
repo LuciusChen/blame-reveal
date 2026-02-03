@@ -403,59 +403,60 @@ Light theme: intensity controls darkness (0=light/invisible, 1=dark/visible)."
       (set-face-attribute face-name nil :background bg-color))
     face-name))
 
+(defun blame-reveal--calculate-loading-intensity (index current-pos num-indicators)
+  "Calculate loading animation intensity for INDEX given CURRENT-POS and NUM-INDICATORS."
+  (let* ((raw-offset (- index current-pos))
+         (offset (cond
+                  ((> raw-offset (/ num-indicators 2.0))
+                   (- raw-offset num-indicators))
+                  ((< raw-offset (- (/ num-indicators 2.0)))
+                   (+ raw-offset num-indicators))
+                  (t raw-offset)))
+         (distance (abs offset)))
+    (cond
+     ((< distance 0.5) 1.0)
+     ((<= distance 3.5)
+      (max 0.1 (* (- 1.0 (* distance 0.25))
+                  (- 1.0 (* distance 0.15)))))
+     (t 0.05))))
+
+(defun blame-reveal--create-loading-indicator-overlay (index current-pos num-indicators)
+  "Create a single loading indicator overlay at INDEX.
+CURRENT-POS is the animation position, NUM-INDICATORS is the total count."
+  (let* ((pos (line-beginning-position))
+         (ov (make-overlay pos pos))
+         (intensity (blame-reveal--calculate-loading-intensity index current-pos num-indicators))
+         (bitmap (if (> intensity 0.2)
+                     'blame-reveal-loading-bright
+                   'blame-reveal-loading-dim))
+         (color (blame-reveal--get-loading-gradient-color intensity))
+         (face (blame-reveal--ensure-fringe-face-with-bg color)))
+    (overlay-put ov 'blame-reveal-loading t)
+    (overlay-put ov 'before-string
+                 (propertize "!" 'display
+                             (list blame-reveal-fringe-side bitmap face)))
+    ov))
+
 (defun blame-reveal--create-loading-animation ()
   "Create loading animation overlays with smooth interpolated trail effect."
-  (let ((win (get-buffer-window (current-buffer))))
-    (if (not win)
-        nil  ; Don't create animation if buffer not visible
-      (let* ((win-height (window-body-height win))
-             (center-line (/ win-height 2))
-             (num-indicators 6)
-             (half-num (/ num-indicators 2))
-             (start-line (max 1 (- center-line half-num)))
-             (overlays nil)
-             ;; Current precise position (including sub-step)
-             (current-pos (+ blame-reveal--loading-animation-step
-                             blame-reveal--loading-animation-sub-step)))
-        (save-excursion
-          (goto-char (window-start win))
-          (forward-line (1- start-line))
-          (dotimes (i num-indicators)
-            (unless (eobp)
-              (let* ((pos (line-beginning-position))
-                     (ov (make-overlay pos pos))
-                     ;; Calculate precise floating-point distance
-                     (raw-offset (- i current-pos))
-                     ;; Normalize offset for seamless cycling
-                     (offset (cond
-                              ((> raw-offset (/ num-indicators 2.0))
-                               (- raw-offset num-indicators))
-                              ((< raw-offset (- (/ num-indicators 2.0)))
-                               (+ raw-offset num-indicators))
-                              (t raw-offset)))
-                     (distance (abs offset))
-                     ;; Exponential decay + smooth interpolation
-                     (intensity (cond
-                                 ((< distance 0.5) 1.0)  ; Core bright region
-                                 ((<= distance 3.5)      ; Smooth decay region
-                                  (max 0.1 (* (- 1.0 (* distance 0.25))
-                                              (- 1.0 (* distance 0.15)))))
-                                 (t 0.05)))              ; Background dim
-                     (bitmap (cond
-                              ((> intensity 0.5) 'blame-reveal-loading-bright)
-                              ((> intensity 0.2) 'blame-reveal-loading-bright)
-                              (t 'blame-reveal-loading-dim)))
-                     (color (blame-reveal--get-loading-gradient-color intensity))
-                     (face (blame-reveal--ensure-fringe-face-with-bg color)))
-                (overlay-put ov 'blame-reveal-loading t)
-                (overlay-put ov 'before-string
-                             (propertize "!" 'display
-                                         (list blame-reveal-fringe-side
-                                               bitmap
-                                               face)))
-                (push ov overlays)
-                (forward-line 1)))))
-        (nreverse overlays)))))
+  (when-let* ((win (get-buffer-window (current-buffer))))
+    (let* ((win-height (window-body-height win))
+           (center-line (/ win-height 2))
+           (num-indicators 6)
+           (half-num (/ num-indicators 2))
+           (start-line (max 1 (- center-line half-num)))
+           (current-pos (+ blame-reveal--loading-animation-step
+                           blame-reveal--loading-animation-sub-step))
+           (overlays nil))
+      (save-excursion
+        (goto-char (window-start win))
+        (forward-line (1- start-line))
+        (dotimes (i num-indicators)
+          (unless (eobp)
+            (push (blame-reveal--create-loading-indicator-overlay i current-pos num-indicators)
+                  overlays)
+            (forward-line 1))))
+      (nreverse overlays))))
 
 (defun blame-reveal--update-loading-animation ()
   "Update loading animation with smooth sub-step interpolation."
@@ -522,6 +523,35 @@ Light theme: intensity controls darkness (0=light/invisible, 1=dark/visible)."
 
 ;;; Rendering Functions
 
+(defun blame-reveal--should-skip-uncommitted-p (commit-hash)
+  "Return t if COMMIT-HASH represents uncommitted changes that should be skipped."
+  (and (blame-reveal--is-uncommitted-p commit-hash)
+       (not blame-reveal-show-uncommitted-fringe)))
+
+(defun blame-reveal--render-block-fringe (block start-line end-line rendered-lines)
+  "Render fringe overlays for BLOCK within START-LINE to END-LINE range.
+Records rendered lines in RENDERED-LINES hash table."
+  (pcase-let* ((`(,block-start ,commit-hash ,block-length) block))
+    (when (and (not (blame-reveal--should-skip-uncommitted-p commit-hash))
+               (blame-reveal--should-render-commit commit-hash))
+      (let* ((color (blame-reveal--get-commit-color commit-hash))
+             (block-end (+ block-start block-length -1))
+             (render-start (max block-start start-line))
+             (render-end (min block-end end-line)))
+        (cl-loop for line-num from render-start to render-end
+                 do (progn
+                      (blame-reveal--create-fringe-overlay line-num color commit-hash)
+                      (puthash line-num t rendered-lines)))))))
+
+(defun blame-reveal--cleanup-stale-fringe-overlays (rendered-lines start-line end-line)
+  "Remove fringe overlays not in RENDERED-LINES within START-LINE to END-LINE."
+  (dolist (overlay (blame-reveal--get-overlays-by-type 'fringe))
+    (when-let* (((overlay-buffer overlay))
+                (line (plist-get (blame-reveal--get-overlay-metadata overlay) :line))
+                ((not (gethash line rendered-lines)))
+                ((<= start-line line end-line)))
+      (blame-reveal--unregister-overlay overlay))))
+
 (defun blame-reveal--render-visible-region ()
   "Render git blame fringe for visible region.
 Reuses existing overlays when possible to minimize visual disruption."
@@ -530,49 +560,21 @@ Reuses existing overlays when possible to minimize visual disruption."
              (not (= (point-max) 1)))
     (when-let* ((range (blame-reveal--get-visible-line-range)))
       (condition-case err
-          (let* ((start-line (car range))
-                 (end-line (cdr range))
-                 (blocks (blame-reveal--find-block-boundaries
-                          blame-reveal--blame-data start-line end-line))
-                 (rendered-lines (make-hash-table :test 'eql)))
+          (pcase-let* ((`(,start-line . ,end-line) range)
+                       (blocks (blame-reveal--find-block-boundaries
+                                blame-reveal--blame-data start-line end-line))
+                       (rendered-lines (make-hash-table :test 'eql)))
             (run-hook-with-args 'blame-reveal-before-render-hook start-line end-line)
             ;; Ensure commit info is loaded for visible blocks
-            (dolist (block blocks)
-              (let ((commit-hash (nth 1 block)))
-                (blame-reveal--ensure-commit-info commit-hash)))
-            ;; Update recent commits based on what's loaded so far
+            (mapc (lambda (block) (blame-reveal--ensure-commit-info (nth 1 block))) blocks)
             (blame-reveal--update-recent-commits)
             ;; Render blocks
-            (dolist (block blocks)
-              (let* ((block-start (nth 0 block))
-                     (commit-hash (nth 1 block))
-                     (block-length (nth 2 block)))
-                ;; Skip uncommitted changes unless explicitly enabled
-                (unless (and (blame-reveal--is-uncommitted-p commit-hash)
-                             (not blame-reveal-show-uncommitted-fringe))
-                  ;; Render permanent fringe for recent commits
-                  (when (blame-reveal--should-render-commit commit-hash)
-                    (let ((color (blame-reveal--get-commit-color commit-hash))
-                          (block-end (+ block-start block-length -1)))
-                      ;; Render each line in visible range
-                      (let ((render-start (max block-start start-line))
-                            (render-end (min block-end end-line)))
-                        (dotimes (i (- render-end render-start -1))
-                          (let ((line-num (+ render-start i)))
-                            (blame-reveal--create-fringe-overlay
-                             line-num color commit-hash)
-                            (puthash line-num t rendered-lines)))))))))
-            ;; Clean up overlays outside visible range
-            (dolist (overlay (blame-reveal--get-overlays-by-type 'fringe))
-              (when (overlay-buffer overlay)
-                (let ((line (plist-get (blame-reveal--get-overlay-metadata overlay) :line)))
-                  (when (and line
-                             (not (gethash line rendered-lines))
-                             (>= line start-line)
-                             (<= line end-line))
-                    (blame-reveal--unregister-overlay overlay)))))
+            (mapc (lambda (block)
+                    (blame-reveal--render-block-fringe block start-line end-line rendered-lines))
+                  blocks)
+            ;; Clean up stale overlays
+            (blame-reveal--cleanup-stale-fringe-overlays rendered-lines start-line end-line)
             (run-hook-with-args 'blame-reveal-after-render-hook start-line end-line)
-            ;; Re-trigger header update
             (blame-reveal--update-header))
         (error
          (message "Error rendering visible region: %s" (error-message-string err)))))))
@@ -581,35 +583,12 @@ Reuses existing overlays when possible to minimize visual disruption."
   "Render blame fringe for newly expanded region.
 Reuses existing overlays when possible to avoid flicker."
   (when blame-reveal--blame-data
-    (let* ((blocks (blame-reveal--find-block-boundaries
-                    blame-reveal--blame-data start-line end-line))
-           (rendered-lines (make-hash-table :test 'eql)))
-      ;; Render blocks
-      (dolist (block blocks)
-        (let* ((block-start (nth 0 block))
-               (commit-hash (nth 1 block))
-               (block-length (nth 2 block)))
-          ;; Skip uncommitted changes unless explicitly enabled
-          (unless (and (blame-reveal--is-uncommitted-p commit-hash)
-                       (not blame-reveal-show-uncommitted-fringe))
-            ;; Render permanent fringe for recent commits
-            (when (blame-reveal--should-render-commit commit-hash)
-              (let ((color (blame-reveal--get-commit-color commit-hash))
-                    (block-end (+ block-start block-length -1)))
-                ;; Render each line in block
-                (dotimes (i (- block-end block-start -1))
-                  (let ((line-num (+ block-start i)))
-                    (blame-reveal--create-fringe-overlay
-                     line-num color commit-hash)
-                    (puthash line-num t rendered-lines))))))))
-      ;; Keep existing overlays outside expanded region
-      (dolist (overlay (blame-reveal--get-overlays-by-type 'fringe))
-        (when (overlay-buffer overlay)
-          (let ((line (plist-get (blame-reveal--get-overlay-metadata overlay) :line)))
-            (when (and line
-                       (not (gethash line rendered-lines))
-                       (or (< line start-line) (> line end-line)))
-              nil)))))))  ; Keep this overlay (outside expanded region)
+    (let ((blocks (blame-reveal--find-block-boundaries
+                   blame-reveal--blame-data start-line end-line))
+          (rendered-lines (make-hash-table :test 'eql)))
+      (mapc (lambda (block)
+              (blame-reveal--render-block-fringe block start-line end-line rendered-lines))
+            blocks))))  ; Keep this overlay (outside expanded region)
 
 (defun blame-reveal--should-render-commit (commit-hash)
   "Check if commit should be rendered in permanent layer.
@@ -625,40 +604,51 @@ Only recent commits are permanently visible."
 
 ;;; Event Handlers
 
+(defun blame-reveal--cache-valid-p (line-num)
+  "Check if current line cache is valid for LINE-NUM."
+  (when-let* ((blame-reveal--current-line-cache)
+              (cached-commit (nth 1 blame-reveal--current-line-cache))
+              (entry (assoc line-num blame-reveal--blame-data)))
+    (equal (cdr entry) cached-commit)))
+
+(defun blame-reveal--find-block-at-line (line-num)
+  "Find the block containing LINE-NUM.
+Returns (COMMIT-HASH . BLOCK-START) or nil."
+  (cl-loop for block in (blame-reveal--find-block-boundaries blame-reveal--blame-data)
+           for block-start = (nth 0 block)
+           for block-commit = (nth 1 block)
+           for block-length = (nth 2 block)
+           when (and (>= line-num block-start)
+                     (< line-num (+ block-start block-length)))
+           return (cons block-commit block-start)))
+
+(defun blame-reveal--find-block-from-overlay (line-num)
+  "Try to find block info from overlays at point for LINE-NUM.
+Returns (COMMIT-HASH . BLOCK-START) or nil."
+  (cl-loop for ov in (overlays-at (point))
+           for commit = (overlay-get ov 'blame-reveal-commit)
+           when commit
+           return (cl-loop for block in (blame-reveal--find-block-boundaries
+                                         blame-reveal--blame-data)
+                           for block-start = (nth 0 block)
+                           for block-commit = (nth 1 block)
+                           for block-length = (nth 2 block)
+                           when (and (equal commit block-commit)
+                                     (>= line-num block-start)
+                                     (< line-num (+ block-start block-length)))
+                           return (cons commit block-start))))
+
 (defun blame-reveal--get-current-block ()
   "Get the commit hash and start line of block at current line.
 Uses caching to avoid repeated searches within the same block."
   (let ((line-num (line-number-at-pos)))
-    ;; Check if the cache is valid
-    (if (and blame-reveal--current-line-cache
-             (let* ((cached-line (nth 0 blame-reveal--current-line-cache))
-                    (cached-commit (nth 1 blame-reveal--current-line-cache))
-                    (cached-start (nth 2 blame-reveal--current-line-cache)))
-               ;; Check if within the cached block range
-               (when-let* ((entry (assoc line-num blame-reveal--blame-data)))
-                 (equal (cdr entry) cached-commit))))
-        ;; Cache hit, return directly.
+    (if (blame-reveal--cache-valid-p line-num)
+        ;; Cache hit
         (cons (nth 1 blame-reveal--current-line-cache)
               (nth 2 blame-reveal--current-line-cache))
-
-      ;; Cache miss, reinitiate search.
-      (let ((result
-             (or (cl-loop for ov in (overlays-at (point))
-                          for commit = (overlay-get ov 'blame-reveal-commit)
-                          when commit
-                          return (cl-loop for block in (blame-reveal--find-block-boundaries
-                                                        blame-reveal--blame-data)
-                                          when (and (equal commit (nth 1 block))
-                                                    (>= line-num (nth 0 block))
-                                                    (< line-num (+ (nth 0 block) (nth 2 block))))
-                                          return (cons commit (nth 0 block))))
-                 ;; Fallback
-                 (cl-loop for block in (blame-reveal--find-block-boundaries
-                                        blame-reveal--blame-data)
-                          when (and (>= line-num (nth 0 block))
-                                    (< line-num (+ (nth 0 block) (nth 2 block))))
-                          return (cons (nth 1 block) (nth 0 block))))))
-        ;; Update cache
+      ;; Cache miss
+      (let ((result (or (blame-reveal--find-block-from-overlay line-num)
+                        (blame-reveal--find-block-at-line line-num))))
         (when result
           (setq blame-reveal--current-line-cache
                 (list line-num (car result) (cdr result))))
@@ -702,79 +692,91 @@ Throttles updates to avoid excessive calls during rapid cursor movement."
                (setq blame-reveal--last-update-line current-line)
                (blame-reveal--update-header-impl)))))))))
 
+(defun blame-reveal--header-needs-update-p (commit-hash block-start)
+  "Check if header needs update for COMMIT-HASH at BLOCK-START."
+  (or (not blame-reveal--header-overlay)
+      (not (equal commit-hash blame-reveal--last-rendered-commit))
+      (/= (line-number-at-pos (overlay-start blame-reveal--header-overlay))
+          block-start)
+      (blame-reveal--header-style-changed-p)))
+
+(defun blame-reveal--update-header-overlay (commit-hash block-start color hide-fringe)
+  "Update or create header overlay for COMMIT-HASH at BLOCK-START.
+Uses COLOR for styling. HIDE-FRINGE controls fringe visibility."
+  (let ((style-changed (blame-reveal--header-style-changed-p)))
+    (if (and blame-reveal--header-overlay
+             (not style-changed)
+             (blame-reveal--ensure-header-overlay
+              blame-reveal--header-overlay
+              block-start commit-hash color hide-fringe))
+        ;; In-place update succeeded
+        (setq blame-reveal--header-current-style
+              (blame-reveal--get-effective-header-style))
+      ;; Need to create new overlay
+      (let ((new-header (blame-reveal--create-header-overlay
+                         block-start commit-hash color hide-fringe)))
+        (blame-reveal--replace-header-overlay new-header)
+        (setq blame-reveal--header-current-style
+              (blame-reveal--get-effective-header-style))))))
+
+(defun blame-reveal--schedule-temp-overlay-if-needed (commit-hash color)
+  "Schedule temp overlay rendering for COMMIT-HASH with COLOR if needed."
+  (let ((is-uncommitted (blame-reveal--is-uncommitted-p commit-hash))
+        (is-old-commit (and (not (blame-reveal--is-uncommitted-p commit-hash))
+                            (not (blame-reveal--is-recent-commit-p commit-hash)))))
+    (when (or is-old-commit
+              (and is-uncommitted blame-reveal-show-uncommitted-fringe))
+      (run-with-idle-timer
+       blame-reveal-temp-overlay-delay nil
+       #'blame-reveal--temp-overlay-renderer
+       (current-buffer) commit-hash color))))
+
+(defun blame-reveal--clear-header-state ()
+  "Clear all header-related state."
+  (blame-reveal--clear-header)
+  (setq blame-reveal--current-block-commit nil
+        blame-reveal--last-rendered-commit nil
+        blame-reveal--header-current-style nil))
+
 (defun blame-reveal--update-header-impl ()
   "Implementation of header update.
 Uses in-place update for smooth transitions without flicker."
   (when blame-reveal--blame-data
     (blame-reveal--ensure-visible-commits-loaded)
-    (if-let ((current-block (blame-reveal--get-current-block)))
-        (let* ((commit-hash (car current-block))
-               (block-start (cdr current-block)))
+    (let ((current-block (blame-reveal--get-current-block)))
+      (if (null current-block)
+          (blame-reveal--clear-header-state)
+        (pcase-let* ((`(,commit-hash . ,block-start) current-block)
+                     (color (blame-reveal--get-commit-color commit-hash))
+                     (is-uncommitted (blame-reveal--is-uncommitted-p commit-hash))
+                     (hide-header-fringe (and is-uncommitted
+                                              (not blame-reveal-show-uncommitted-fringe))))
           (unless (equal commit-hash blame-reveal--current-block-commit)
             (setq blame-reveal--current-block-commit commit-hash))
-          (let* ((color (blame-reveal--get-commit-color commit-hash))
-                 (is-uncommitted (blame-reveal--is-uncommitted-p commit-hash))
-                 (is-old-commit (and (not is-uncommitted)
-                                     (not (blame-reveal--is-recent-commit-p commit-hash))))
-                 (hide-header-fringe (and is-uncommitted
-                                          (not blame-reveal-show-uncommitted-fringe)))
-                 ;; Check if header style changed (requires rebuild)
-                 (style-changed (blame-reveal--header-style-changed-p))
-                 ;; Check if we need any update
-                 (need-update (or (not blame-reveal--header-overlay)
-                                  (not (equal commit-hash blame-reveal--last-rendered-commit))
-                                  (/= (line-number-at-pos (overlay-start blame-reveal--header-overlay))
-                                      block-start)
-                                  style-changed)))
-
-            (when need-update
-              (if (and blame-reveal--header-overlay
-                       (not style-changed)
-                       ;; Try in-place update first (no flicker)
-                       (blame-reveal--ensure-header-overlay
-                        blame-reveal--header-overlay
-                        block-start commit-hash color hide-header-fringe))
-                  ;; In-place update succeeded
-                  (setq blame-reveal--header-current-style
-                        (blame-reveal--get-effective-header-style))
-                ;; Need to create new overlay (first time or style changed)
-                (let ((new-header (blame-reveal--create-header-overlay
-                                   block-start commit-hash color hide-header-fringe)))
-                  (blame-reveal--replace-header-overlay new-header)
-                  (setq blame-reveal--header-current-style
-                        (blame-reveal--get-effective-header-style)))))
-
-            (when (or is-old-commit
-                      (and is-uncommitted blame-reveal-show-uncommitted-fringe))
-              (run-with-idle-timer
-                     blame-reveal-temp-overlay-delay nil
-                     #'blame-reveal--temp-overlay-renderer
-                     (current-buffer) commit-hash color))
-            (setq blame-reveal--last-rendered-commit commit-hash)))
-      ;; No current block - clear header
-      (blame-reveal--clear-header)
-      (setq blame-reveal--current-block-commit nil)
-      (setq blame-reveal--last-rendered-commit nil)
-      (setq blame-reveal--header-current-style nil))
+          (when (blame-reveal--header-needs-update-p commit-hash block-start)
+            (blame-reveal--update-header-overlay commit-hash block-start color hide-header-fringe))
+          (blame-reveal--schedule-temp-overlay-if-needed commit-hash color)
+          (setq blame-reveal--last-rendered-commit commit-hash))))
     (blame-reveal--update-sticky-header)))
+
+(defun blame-reveal--maybe-expand-blame-range ()
+  "Expand blame data range if visible area extends beyond loaded range."
+  (when-let* ((blame-reveal--blame-data-range)
+              (range (blame-reveal--get-visible-line-range)))
+    (pcase-let* ((`(,start-line . ,end-line) range)
+                 (`(,current-start . ,current-end) blame-reveal--blame-data-range))
+      (when (or (< start-line current-start)
+                (> end-line current-end))
+        (blame-reveal--ensure-range-loaded start-line end-line)))))
 
 (defun blame-reveal--scroll-handler-impl (buf)
   "Implementation of scroll handler for buffer BUF."
   (when (buffer-live-p buf)
     (with-current-buffer buf
-      (when (and blame-reveal-mode
-                 (buffer-file-name))
+      (when (and blame-reveal-mode (buffer-file-name))
         (condition-case err
             (progn
-              (when blame-reveal--blame-data-range
-                (when-let* ((range (blame-reveal--get-visible-line-range)))
-                  (let ((start-line (car range))
-                        (end-line (cdr range))
-                        (current-start (car blame-reveal--blame-data-range))
-                        (current-end (cdr blame-reveal--blame-data-range)))
-                    (when (or (< start-line current-start)
-                              (> end-line current-end))
-                      (blame-reveal--ensure-range-loaded start-line end-line)))))
+              (blame-reveal--maybe-expand-blame-range)
               (unless (and (eq blame-reveal--state-status 'loading)
                            (eq blame-reveal--state-operation 'expansion))
                 (blame-reveal--render-visible-region)
