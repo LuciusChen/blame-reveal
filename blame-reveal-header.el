@@ -488,37 +488,31 @@ If STICKY-INDICATOR is provided, it should be a propertized string with face alr
        existing-overlay line-number commit-hash color (not show-fringe)
        sticky-indicator))))
 
+(defun blame-reveal--sticky-header-needs-update-p (commit-hash should-show window-start)
+  "Check if sticky header needs update for COMMIT-HASH, SHOULD-SHOW, WINDOW-START."
+  (let ((cached-commit (plist-get blame-reveal--sticky-header-state :commit))
+        (cached-visible (plist-get blame-reveal--sticky-header-state :visible))
+        (cached-window-start (plist-get blame-reveal--sticky-header-state :window-start)))
+    (or (not (equal cached-commit commit-hash))
+        (not (eq cached-visible should-show))
+        (and should-show
+             (not (equal cached-window-start window-start))))))
+
 (defun blame-reveal--update-sticky-header ()
   "Update sticky header using in-place update for smooth transitions."
-  (when-let* ((current-block (blame-reveal--get-current-block))
-              (commit-hash (car current-block))
-              (block-start-line (cdr current-block))
-              (current-line (line-number-at-pos)))
-    (let* ((should-show (blame-reveal--should-show-sticky-header-p
-                         commit-hash block-start-line current-line))
-           (window-start (window-start))
-           ;; Check cached state
-           (cached-commit (plist-get blame-reveal--sticky-header-state :commit))
-           (cached-visible (plist-get blame-reveal--sticky-header-state :visible))
-           (cached-window-start (plist-get blame-reveal--sticky-header-state :window-start))
-           ;; Determine if update is needed
-           (need-update (or (not (equal cached-commit commit-hash))
-                            (not (eq cached-visible should-show))
-                            (and should-show
-                                 (not (equal cached-window-start window-start))))))
-      (when need-update
+  (when-let* ((current-block (blame-reveal--get-current-block)))
+    (pcase-let* ((`(,commit-hash . ,block-start-line) current-block)
+                 (current-line (line-number-at-pos))
+                 (should-show (blame-reveal--should-show-sticky-header-p
+                               commit-hash block-start-line current-line))
+                 (window-start (window-start)))
+      (when (blame-reveal--sticky-header-needs-update-p commit-hash should-show window-start)
         (if should-show
-            ;; Show sticky header: use the unified ensure function
             (let ((new-sticky (blame-reveal--ensure-sticky-header
                                blame-reveal--sticky-header-overlay commit-hash)))
-              ;; Only replace if a new one was created (i.e., not an in-place update)
               (unless (eq new-sticky blame-reveal--sticky-header-overlay)
-                 (blame-reveal--replace-sticky-header-overlay new-sticky)))
-
-          ;; Hide sticky header
+                (blame-reveal--replace-sticky-header-overlay new-sticky)))
           (blame-reveal--clear-sticky-header-no-flicker))
-
-        ;; Update cached state
         (setq blame-reveal--sticky-header-state
               (list :commit commit-hash
                     :visible should-show
@@ -654,48 +648,46 @@ Returns a plist containing :string-type, :content, :position-fn, and :end-pos-fn
                :position-fn (lambda (line) (line-beginning-position))
                :end-pos-fn (lambda (bol) (1+ bol))))))))
 
+(defun blame-reveal--update-overlay-in-place (overlay start-pos end-pos string-type content)
+  "Update OVERLAY in place at START-POS to END-POS with STRING-TYPE and CONTENT."
+  (move-overlay overlay start-pos end-pos)
+  (dolist (prop '(before-string after-string line-prefix))
+    (overlay-put overlay prop nil))
+  (overlay-put overlay string-type content)
+  overlay)
+
+(defun blame-reveal--create-new-header-overlay (start-pos end-pos string-type content)
+  "Create new header overlay at START-POS to END-POS with STRING-TYPE and CONTENT."
+  (let ((overlay (make-overlay start-pos end-pos)))
+    (overlay-put overlay 'blame-reveal t)
+    (overlay-put overlay 'blame-reveal-header t)
+    (overlay-put overlay string-type content)
+    overlay))
+
 (defun blame-reveal--ensure-header-overlay (existing-overlay line commit-hash &optional color no-fringe sticky-indicator)
   "Ensures a header overlay exists at LINE for COMMIT-HASH, creating one if
 EXISTING-OVERLAY is nil or invalid, or updating it in place otherwise.
 Returns the active overlay."
-
   (let* ((commit-color (or color (blame-reveal--get-commit-color commit-hash)))
          (style (blame-reveal--get-effective-header-style))
          (params (blame-reveal--render-style-data
-                  commit-hash style commit-color no-fringe sticky-indicator))
-         (string-type (plist-get params :string-type))
-         (content (plist-get params :content))
-         (pos-fn (plist-get params :position-fn))
-         (end-pos-fn (plist-get params :end-pos-fn))
-         (overlay existing-overlay))
-
-    (unless params
-      (warn "Could not render header data for style %s" style)
-      (return-from blame-reveal--ensure-header-overlay nil))
-
-    (save-excursion
-      (goto-char (point-min))
-      (forward-line (1- line))
-      (let* ((start-pos (funcall pos-fn line))
-             (end-pos (funcall end-pos-fn start-pos)))
-
-        (if (and overlay (overlayp overlay) (overlay-buffer overlay))
-            ;; Case 1: UPDATE IN PLACE (Avoids flicker)
-            (progn
-              (move-overlay overlay start-pos end-pos)
-              ;; Clear other properties for safety
-              (dolist (prop '(before-string after-string line-prefix))
-                (overlay-put overlay prop nil))
-              (overlay-put overlay string-type content))
-
-          ;; Case 2: CREATE NEW OVERLAY
-          (setq overlay (make-overlay start-pos end-pos))
-          (overlay-put overlay 'blame-reveal t)
-          (overlay-put overlay 'blame-reveal-header t)
-          (overlay-put overlay string-type content)))
-
-      ;; Return the result (updated or newly created overlay)
-      overlay)))
+                  commit-hash style commit-color no-fringe sticky-indicator)))
+    (if (null params)
+        (progn
+          (warn "Could not render header data for style %s" style)
+          nil)
+      (let ((string-type (plist-get params :string-type))
+            (content (plist-get params :content))
+            (position-fn (plist-get params :position-fn))
+            (end-pos-fn (plist-get params :end-pos-fn)))
+        (save-excursion
+          (goto-char (point-min))
+          (forward-line (1- line))
+          (let* ((start-pos (funcall position-fn line))
+                 (end-pos (funcall end-pos-fn start-pos)))
+            (if (and existing-overlay (overlayp existing-overlay) (overlay-buffer existing-overlay))
+                (blame-reveal--update-overlay-in-place existing-overlay start-pos end-pos string-type content)
+              (blame-reveal--create-new-header-overlay start-pos end-pos string-type content))))))))
 
 (provide 'blame-reveal-header)
 ;;; blame-reveal-header.el ends here

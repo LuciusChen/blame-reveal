@@ -109,38 +109,41 @@ Reuses `blame-reveal--find-block-boundaries' from core module."
 
 ;;; Focus Mode Rendering (Reuses existing overlay system)
 
+(defun blame-reveal-focus--render-focus-block (block vis-start vis-end color commit-hash rendered-lines)
+  "Render BLOCK within VIS-START to VIS-END range using COLOR for COMMIT-HASH.
+Records rendered lines in RENDERED-LINES hash table."
+  (pcase-let* ((`(,block-start ,_ ,block-length) block)
+               (block-end (+ block-start block-length -1)))
+    (when (and (<= block-start vis-end)
+               (>= block-end vis-start))
+      (let ((render-start (max block-start vis-start))
+            (render-end (min block-end vis-end)))
+        (cl-loop for line from render-start to render-end
+                 do (progn
+                      (blame-reveal--create-fringe-overlay line color commit-hash)
+                      (puthash line t rendered-lines)))))))
+
 (defun blame-reveal-focus--render-visible-region ()
   "Render fringe overlays for focused commit in visible region.
 Reuses `blame-reveal--create-fringe-overlay' from overlay module."
   (when (and blame-reveal--focused-commit
              blame-reveal--focus-block-cache)
-    (let* ((range (blame-reveal--get-visible-line-range))
-           (vis-start (car range))
-           (vis-end (cdr range))
-           (color (blame-reveal-focus--get-color))
-           (commit-hash blame-reveal--focused-commit)
-           (rendered-lines (make-hash-table :test 'eql)))
+    (pcase-let* ((range (blame-reveal--get-visible-line-range))
+                 (`(,vis-start . ,vis-end) range)
+                 (color (blame-reveal-focus--get-color))
+                 (commit-hash blame-reveal--focused-commit)
+                 (rendered-lines (make-hash-table :test 'eql)))
       ;; Render fringe for visible focused lines
-      (dolist (block blame-reveal--focus-block-cache)
-        (let* ((block-start (nth 0 block))
-               (block-length (nth 2 block))
-               (block-end (+ block-start block-length -1)))
-          ;; Only render if block overlaps with visible range
-          (when (and (<= block-start vis-end)
-                     (>= block-end vis-start))
-            (let ((render-start (max block-start vis-start))
-                  (render-end (min block-end vis-end)))
-              (cl-loop for line from render-start to render-end
-                       do (progn
-                            ;; Reuse existing fringe overlay creation
-                            (blame-reveal--create-fringe-overlay line color commit-hash)
-                            (puthash line t rendered-lines)))))))
+      (mapc (lambda (block)
+              (blame-reveal-focus--render-focus-block
+               block vis-start vis-end color commit-hash rendered-lines))
+            blame-reveal--focus-block-cache)
       ;; Clean up fringe overlays outside visible range
       (dolist (overlay (blame-reveal--get-overlays-by-type 'fringe))
-        (when (overlay-buffer overlay)
-          (let ((line (plist-get (blame-reveal--get-overlay-metadata overlay) :line)))
-            (when (and line (not (gethash line rendered-lines)))
-              (blame-reveal--unregister-overlay overlay))))))))
+        (when-let* (((overlay-buffer overlay))
+                    (line (plist-get (blame-reveal--get-overlay-metadata overlay) :line))
+                    ((not (gethash line rendered-lines))))
+          (blame-reveal--unregister-overlay overlay))))))
 
 ;;; Focus Mode Entry/Exit
 
@@ -197,22 +200,21 @@ Reuses `blame-reveal--create-fringe-overlay' from overlay module."
 
 ;;; Focus Mode Header Integration
 
+(defun blame-reveal-focus--find-block-containing-line (line)
+  "Find the focus block containing LINE, or nil if not found."
+  (cl-find-if
+   (lambda (block)
+     (pcase-let ((`(,start ,_ ,len) block))
+       (and (>= line start)
+            (< line (+ start len)))))
+   blame-reveal--focus-block-cache))
+
 (defun blame-reveal-focus--get-current-block-for-header ()
   "Get block info for header display in focus mode.
 Returns (COMMIT-HASH . BLOCK-START) like `blame-reveal--get-current-block'."
   (when blame-reveal--focused-commit
-    (let* ((current-line (line-number-at-pos))
-           ;; Find block containing current line
-           (current-block
-            (cl-find-if
-             (lambda (block)
-               (let ((start (nth 0 block))
-                     (len (nth 2 block)))
-                 (and (>= current-line start)
-                      (< current-line (+ start len)))))
-             blame-reveal--focus-block-cache)))
-      (if current-block
-          ;; In a focused block, return it
+    (let ((current-line (line-number-at-pos)))
+      (if-let* ((current-block (blame-reveal-focus--find-block-containing-line current-line)))
           (cons blame-reveal--focused-commit (nth 0 current-block))
         ;; Not in any focused block, keep header at previous position
         (when blame-reveal--header-overlay
@@ -224,21 +226,11 @@ Returns (COMMIT-HASH . BLOCK-START) like `blame-reveal--get-current-block'."
 In focus mode, always show sticky header when regular header is not visible."
   (when (and blame-reveal--focused-commit
              blame-reveal--focus-block-cache)
-    (let* ((current-line (line-number-at-pos))
-           (window-start-line (line-number-at-pos (window-start)))
-           ;; Find block containing current line
-           (current-block
-            (cl-find-if
-             (lambda (block)
-               (let ((start (nth 0 block))
-                     (len (nth 2 block)))
-                 (and (>= current-line start)
-                      (< current-line (+ start len)))))
-             blame-reveal--focus-block-cache)))
-      (when current-block
-        (let ((block-start (nth 0 current-block)))
-          ;; Show sticky if block header is scrolled out of view
-          (> window-start-line block-start))))))
+    (let ((current-line (line-number-at-pos))
+          (window-start-line (line-number-at-pos (window-start))))
+      (when-let* ((current-block (blame-reveal-focus--find-block-containing-line current-line))
+                  (block-start (nth 0 current-block)))
+        (> window-start-line block-start)))))
 
 ;;; Block Navigation
 
@@ -262,14 +254,7 @@ Returns block (START-LINE COMMIT-HASH LENGTH) or nil if no more blocks."
   "Find the block containing the current line, if any.
 Returns block (START-LINE COMMIT-HASH LENGTH) or nil."
   (when blame-reveal--focus-block-cache
-    (let ((current-line (line-number-at-pos)))
-      (cl-find-if
-       (lambda (block)
-         (let ((start (nth 0 block))
-               (len (nth 2 block)))
-           (and (>= current-line start)
-                (< current-line (+ start len)))))
-       blame-reveal--focus-block-cache))))
+    (blame-reveal-focus--find-block-containing-line (line-number-at-pos))))
 
 (defun blame-reveal-focus--goto-block (block)
   "Move point to the start of BLOCK and update display."
