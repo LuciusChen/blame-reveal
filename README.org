@@ -66,21 +66,23 @@ M-x blame-reveal-mode
 
 ** Keybindings
 
-| Key   | Action                      |
-|-------+-----------------------------|
-| =q=   | Toggle mode                 |
-| =m=   | Open transient menu         |
-| =c=   | Copy commit hash            |
-| =d=   | Show commit diff            |
-| =s=   | Show commit details         |
-| =h=   | File history                |
-| =l=   | Line history                |
-| =b=   | Blame parent (recursive)    |
-| =p= / =^= | Go back in blame stack  |
-| =g=   | Blame at specific revision  |
-| =r=   | Reset to HEAD               |
-| =F=   | Toggle focus mode           |
-| =n= / =N= | Navigate focus blocks   |
+Prefix keybindings (=C-c l=):
+
+| Key         | Action                      |
+|-------------+-----------------------------|
+| =C-c l m=   | Open transient menu         |
+| =C-c l q=   | Toggle mode                 |
+| =C-c l c=   | Copy commit hash            |
+| =C-c l d=   | Show commit diff            |
+| =C-c l s=   | Show commit details         |
+| =C-c l h=   | File history                |
+| =C-c l l=   | Line history                |
+| =C-c l b=   | Blame parent (recursive)    |
+| =C-c l p= / =C-c l ^= | Go back in blame stack |
+| =C-c l g=   | Blame at specific revision  |
+| =C-c l r=   | Reset to HEAD               |
+| =C-c l f=   | Toggle focus mode           |
+| =C-c l n= / =C-c l N= | Navigate focus blocks |
 
 ** Configuration
 

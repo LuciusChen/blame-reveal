@@ -69,8 +69,10 @@
 
 ;;; Keymaps
 
-(defvar blame-reveal-mode-map
+(defvar blame-reveal-prefix-map
   (let ((map (make-sparse-keymap)))
+    ;; Menu and primary commands
+    (define-key map (kbd "m") #'blame-reveal-menu)
     (define-key map (kbd "q") #'blame-reveal-mode)
     (define-key map (kbd "c") #'blame-reveal-copy-commit-hash)
     (define-key map (kbd "d") #'blame-reveal-show-commit-diff)
@@ -82,9 +84,20 @@
     (define-key map (kbd "^") #'blame-reveal-blame-back)
     (define-key map (kbd "g") #'blame-reveal-blame-at-revision)
     (define-key map (kbd "r") #'blame-reveal-reset-to-head)
-    (define-key map (kbd "m") #'blame-reveal-menu)
+    ;; Focus mode (requires blame-reveal-focus)
+    (define-key map (kbd "f") #'blame-reveal-focus-commit)
+    (define-key map (kbd "n") #'blame-reveal-next-focus-block)
+    (define-key map (kbd "N") #'blame-reveal-prev-focus-block)
     map)
-  "Keymap for blame-reveal-mode.")
+  "Prefix keymap for `blame-reveal-mode' commands under `C-c l'.")
+
+(defvar blame-reveal-mode-map
+  (let ((map (make-sparse-keymap)))
+    ;; Prefix bindings: C-c l <key>
+    (define-key map (kbd "C-c l") blame-reveal-prefix-map)
+    map)
+  "Keymap for `blame-reveal-mode'.
+Commands are available under the `C-c l` prefix.")
 
 (defvar blame-reveal--emulation-alist nil
   "Emulation mode map alist for blame-reveal.")
