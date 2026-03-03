@@ -42,7 +42,7 @@ When using ='auto= days limit, =blame-reveal-gradient-quality= tunes the balance
 
 *** Recursive Blame & Focus Mode
 
-Navigate line history through parent commits (=b=), or lock onto a single commit to see all its modifications across the file (=F=).
+Navigate line history through parent commits (=C-c l b=), or lock onto a single commit to see all its modifications across the file (=C-c l f=).
 
 ** Installation
 
@@ -66,21 +66,25 @@ M-x blame-reveal-mode
 
 ** Keybindings
 
-| Key   | Action                      |
-|-------+-----------------------------|
-| =q=   | Toggle mode                 |
-| =m=   | Open transient menu         |
-| =c=   | Copy commit hash            |
-| =d=   | Show commit diff            |
-| =s=   | Show commit details         |
-| =h=   | File history                |
-| =l=   | Line history                |
-| =b=   | Blame parent (recursive)    |
-| =p= / =^= | Go back in blame stack  |
-| =g=   | Blame at specific revision  |
-| =r=   | Reset to HEAD               |
-| =F=   | Toggle focus mode           |
-| =n= / =N= | Navigate focus blocks   |
+All bindings use the =C-c l= prefix so the mode does not interfere with
+normal text editing.
+
+| Key         | Action                      |
+|-------------+-----------------------------|
+| =C-c l=     | Open transient menu         |
+| =C-c l q=   | Toggle mode                 |
+| =C-c l c=   | Copy commit hash            |
+| =C-c l d=   | Show commit diff            |
+| =C-c l s=   | Show commit details         |
+| =C-c l h=   | File history                |
+| =C-c l l=   | Line history                |
+| =C-c l b=   | Blame parent (recursive)    |
+| =C-c l p=   | Go back in blame stack      |
+| =C-c l g=   | Blame at specific revision  |
+| =C-c l r=   | Reset to HEAD               |
+| =C-c l f=   | Toggle focus mode           |
+| =C-c l n=   | Next focus block            |
+| =C-c l N=   | Previous focus block        |
 
 ** Configuration
 
@@ -148,7 +152,7 @@ Format functions receive =(commit-hash commit-info color)= and return a =blame-r
 
 ** Transient Menu
 
-Press =m= in blame-reveal-mode to open the configuration menu:
+Press =C-c l= in blame-reveal-mode to open the configuration menu:
 
 - Toggle settings in real-time
 - Switch header/fringe/margin styles
