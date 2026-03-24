@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="840" viewBox="0 0 1200 840">
+  <rect width="1200" height="840" fill="#eef2f7"/>
+
+  <text x="40" y="44" font-size="28" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#111827">
+    blame-reveal color comparison
+  </text>
+  <text x="40" y="72" font-size="14" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#4b5563">
+    Tuned single-hue gradient vs optimized six-step heatmap
+  </text>
+
+  <rect x="40" y="96" width="540" height="320" rx="20" fill="#111827"/>
+  <text x="70" y="138" font-size="22" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#f9fafb">Gradient / Dark</text>
+  <text x="70" y="164" font-size="13" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#9ca3af">hue 200, locally best single-hue gradient</text>
+  <text x="70" y="184" font-size="13" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#9ca3af">subtle age ranking, minimal semantic jumps</text>
+  <g>
+    <rect x="70" y="210" width="72" height="110" rx="10" fill="#93d1f0"/>
+    <rect x="150" y="210" width="72" height="110" rx="10" fill="#3b9ccc"/>
+    <rect x="230" y="210" width="72" height="110" rx="10" fill="#316d8b"/>
+    <rect x="310" y="210" width="72" height="110" rx="10" fill="#2b556a"/>
+    <rect x="390" y="210" width="72" height="110" rx="10" fill="#284c5e"/>
+    <rect x="470" y="210" width="72" height="110" rx="10" fill="#284b5d"/>
+
+    <text x="100" y="338" text-anchor="middle" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#d1d5db">1</text>
+    <text x="180" y="338" text-anchor="middle" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#d1d5db">2</text>
+    <text x="260" y="338" text-anchor="middle" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#d1d5db">3</text>
+    <text x="340" y="338" text-anchor="middle" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#d1d5db">4</text>
+    <text x="420" y="338" text-anchor="middle" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#d1d5db">5</text>
+    <text x="500" y="338" text-anchor="middle" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#d1d5db">6</text>
+
+    <text x="70" y="362" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#d1d5db">newest recent</text>
+    <text x="432" y="362" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#d1d5db">older recent</text>
+  </g>
+  <rect x="70" y="378" width="472" height="12" rx="6" fill="#1c3541"/>
+  <text x="70" y="404" font-size="13" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#9ca3af">older commits fallback</text>
+
+  <rect x="620" y="96" width="540" height="320" rx="20" fill="#111827"/>
+  <text x="650" y="138" font-size="22" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#f9fafb">Heatmap / Dark</text>
+  <text x="650" y="164" font-size="13" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#9ca3af">six-step semantic palette, warm to cool</text>
+  <text x="650" y="184" font-size="13" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#9ca3af">instant age grouping at a glance</text>
+  <g>
+    <rect x="650" y="210" width="72" height="110" rx="10" fill="#ff6b4a"/>
+    <rect x="730" y="210" width="72" height="110" rx="10" fill="#ff9350"/>
+    <rect x="810" y="210" width="72" height="110" rx="10" fill="#ffc857"/>
+    <rect x="890" y="210" width="72" height="110" rx="10" fill="#93c25f"/>
+    <rect x="970" y="210" width="72" height="110" rx="10" fill="#5aa6ad"/>
+    <rect x="1050" y="210" width="72" height="110" rx="10" fill="#6178ad"/>
+
+    <text x="680" y="338" text-anchor="middle" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#d1d5db">1</text>
+    <text x="760" y="338" text-anchor="middle" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#d1d5db">2</text>
+    <text x="840" y="338" text-anchor="middle" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#d1d5db">3</text>
+    <text x="920" y="338" text-anchor="middle" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#d1d5db">4</text>
+    <text x="1000" y="338" text-anchor="middle" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#d1d5db">5</text>
+    <text x="1080" y="338" text-anchor="middle" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#d1d5db">6</text>
+
+    <text x="650" y="362" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#d1d5db">newest recent</text>
+    <text x="1012" y="362" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#d1d5db">older recent</text>
+  </g>
+  <rect x="650" y="378" width="472" height="12" rx="6" fill="#46546a"/>
+  <text x="650" y="404" font-size="13" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#9ca3af">older commits fallback</text>
+
+  <rect x="40" y="446" width="540" height="320" rx="20" fill="#f8fafc" stroke="#d1d5db"/>
+  <text x="70" y="488" font-size="22" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#111827">Gradient / Light</text>
+  <text x="70" y="514" font-size="13" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#6b7280">dark newest against pale old background</text>
+  <text x="70" y="534" font-size="13" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#6b7280">same ranking logic, gentler overall contrast</text>
+  <g>
+    <rect x="70" y="560" width="72" height="110" rx="10" fill="#105375"/>
+    <rect x="150" y="560" width="72" height="110" rx="10" fill="#429fce"/>
+    <rect x="230" y="560" width="72" height="110" rx="10" fill="#8ebed7"/>
+    <rect x="310" y="560" width="72" height="110" rx="10" fill="#b1d0df"/>
+    <rect x="390" y="560" width="72" height="110" rx="10" fill="#bdd6e3"/>
+    <rect x="470" y="560" width="72" height="110" rx="10" fill="#bfd7e3"/>
+
+    <text x="100" y="688" text-anchor="middle" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#374151">1</text>
+    <text x="180" y="688" text-anchor="middle" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#374151">2</text>
+    <text x="260" y="688" text-anchor="middle" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#374151">3</text>
+    <text x="340" y="688" text-anchor="middle" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#374151">4</text>
+    <text x="420" y="688" text-anchor="middle" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#374151">5</text>
+    <text x="500" y="688" text-anchor="middle" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#374151">6</text>
+
+    <text x="70" y="712" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#374151">newest recent</text>
+    <text x="432" y="712" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#374151">older recent</text>
+  </g>
+  <rect x="70" y="728" width="472" height="12" rx="6" fill="#dfebf1"/>
+  <text x="70" y="754" font-size="13" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#6b7280">older commits fallback</text>
+
+  <rect x="620" y="446" width="540" height="320" rx="20" fill="#f8fafc" stroke="#d1d5db"/>
+  <text x="650" y="488" font-size="22" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#111827">Heatmap / Light</text>
+  <text x="650" y="514" font-size="13" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#6b7280">six-step palette, stronger separation than gradient</text>
+  <text x="650" y="534" font-size="13" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#6b7280">less subtle ranking, clearer group identity</text>
+  <g>
+    <rect x="650" y="560" width="72" height="110" rx="10" fill="#c2412d"/>
+    <rect x="730" y="560" width="72" height="110" rx="10" fill="#d96a1c"/>
+    <rect x="810" y="560" width="72" height="110" rx="10" fill="#b88a00"/>
+    <rect x="890" y="560" width="72" height="110" rx="10" fill="#6f8c34"/>
+    <rect x="970" y="560" width="72" height="110" rx="10" fill="#3c8088"/>
+    <rect x="1050" y="560" width="72" height="110" rx="10" fill="#5368a8"/>
+
+    <text x="680" y="688" text-anchor="middle" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#374151">1</text>
+    <text x="760" y="688" text-anchor="middle" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#374151">2</text>
+    <text x="840" y="688" text-anchor="middle" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#374151">3</text>
+    <text x="920" y="688" text-anchor="middle" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#374151">4</text>
+    <text x="1000" y="688" text-anchor="middle" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#374151">5</text>
+    <text x="1080" y="688" text-anchor="middle" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#374151">6</text>
+
+    <text x="650" y="712" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#374151">newest recent</text>
+    <text x="1012" y="712" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#374151">older recent</text>
+  </g>
+  <rect x="650" y="728" width="472" height="12" rx="6" fill="#c8ced7"/>
+  <text x="650" y="754" font-size="13" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#6b7280">older commits fallback</text>
+</svg>

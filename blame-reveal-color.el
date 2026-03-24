@@ -11,6 +11,7 @@
 (require 'blame-reveal-core)
 
 (defvar blame-reveal-color-scheme)
+(defvar blame-reveal-color-mode)
 (defvar blame-reveal-old-commit-color)
 (defvar blame-reveal-uncommitted-color)
 (defvar blame-reveal-show-uncommitted-fringe)
@@ -19,6 +20,7 @@
 
 (declare-function blame-reveal--ensure-commit-info "blame-reveal-git" (commit-hash))
 (declare-function blame-reveal--force-update-header "blame-reveal")
+(declare-function blame-reveal--set-config-value "blame-reveal-transient" (variable value))
 
 ;;; Color Strategy Protocol
 
@@ -58,6 +60,14 @@
          (g (round (* 255 (+ (nth 1 rgb) m))))
          (b (round (* 255 (+ (nth 2 rgb) m)))))
     (format "#%02x%02x%02x" r g b)))
+
+(defun blame-reveal-color--palette-color (palette rank total)
+  "Return a discrete palette color from PALETTE for RANK out of TOTAL commits."
+  (let* ((last-index (max 0 (1- (length palette))))
+         (index (if (or (null rank) (<= total 1))
+                    0
+                  (round (* (/ (float rank) (max 1 (1- total))) last-index)))))
+    (nth (max 0 (min last-index index)) palette)))
 
 ;;; Gradient Strategy
 
@@ -124,18 +134,62 @@
   ((_strategy blame-reveal-gradient-strategy) context)
   (if (plist-get context :is-dark) "#d9a066" "#e6b380"))
 
+;;; Heatmap Strategy
+
+(cl-defstruct (blame-reveal-heatmap-strategy
+               (:include blame-reveal-color-strategy)
+               (:constructor blame-reveal-heatmap-strategy-create))
+  (dark-palette '("#ff6b4a" "#ff9350" "#ffc857" "#93c25f" "#5aa6ad" "#6178ad"))
+  (light-palette '("#c2412d" "#d96a1c" "#b88a00" "#6f8c34" "#3c8088" "#5368a8"))
+  (dark-old "#46546a")
+  (light-old "#c8ced7"))
+
+(cl-defmethod blame-reveal-color-calculate
+  ((strategy blame-reveal-heatmap-strategy) _commit-hash context)
+  (let* ((rank (plist-get context :rank))
+         (total-recent (plist-get context :total-recent))
+         (is-dark (plist-get context :is-dark))
+         (palette (if is-dark
+                      (blame-reveal-heatmap-strategy-dark-palette strategy)
+                    (blame-reveal-heatmap-strategy-light-palette strategy))))
+    (when (and rank total-recent (> total-recent 0))
+      (blame-reveal-color--palette-color palette rank total-recent))))
+
+(cl-defmethod blame-reveal-color-quality
+  ((_strategy blame-reveal-heatmap-strategy) num-commits _context)
+  (cond
+   ((<= num-commits 6) 1.0)
+   ((<= num-commits 12) 0.9)
+   ((<= num-commits 18) 0.75)
+   ((<= num-commits 30) 0.55)
+   (t 0.35)))
+
+(cl-defmethod blame-reveal-color-old
+  ((strategy blame-reveal-heatmap-strategy) context)
+  (if (plist-get context :is-dark)
+      (blame-reveal-heatmap-strategy-dark-old strategy)
+    (blame-reveal-heatmap-strategy-light-old strategy)))
+
+(cl-defmethod blame-reveal-color-uncommitted
+  ((_strategy blame-reveal-heatmap-strategy) context)
+  (if (plist-get context :is-dark) "#ff8f3f" "#cf6b16"))
+
 ;;; Strategy Initialization
 
 (defun blame-reveal--init-color-strategy ()
   (setq blame-reveal--color-strategy
-        (blame-reveal-gradient-strategy-create
-         :hue (plist-get blame-reveal-color-scheme :hue)
-         :dark-newest (plist-get blame-reveal-color-scheme :dark-newest)
-         :dark-oldest (plist-get blame-reveal-color-scheme :dark-oldest)
-         :light-newest (plist-get blame-reveal-color-scheme :light-newest)
-         :light-oldest (plist-get blame-reveal-color-scheme :light-oldest)
-         :saturation-min (plist-get blame-reveal-color-scheme :saturation-min)
-         :saturation-max (plist-get blame-reveal-color-scheme :saturation-max))))
+        (pcase blame-reveal-color-mode
+          ('heatmap
+           (blame-reveal-heatmap-strategy-create))
+          (_
+           (blame-reveal-gradient-strategy-create
+            :hue (plist-get blame-reveal-color-scheme :hue)
+            :dark-newest (plist-get blame-reveal-color-scheme :dark-newest)
+            :dark-oldest (plist-get blame-reveal-color-scheme :dark-oldest)
+            :light-newest (plist-get blame-reveal-color-scheme :light-newest)
+            :light-oldest (plist-get blame-reveal-color-scheme :light-oldest)
+            :saturation-min (plist-get blame-reveal-color-scheme :saturation-min)
+            :saturation-max (plist-get blame-reveal-color-scheme :saturation-max))))))
 
 ;;; Color Access Functions
 
@@ -454,9 +508,9 @@ Returns: integer days limit or nil."
   "Return the full color scheme plist for the given PRESET symbol."
   (pcase preset
     ('blue
-     '(:hue 210 :dark-newest 0.70 :dark-oldest 0.35
-       :light-newest 0.45 :light-oldest 0.75
-       :saturation-min 0.25 :saturation-max 0.60))
+     '(:hue 200 :dark-newest 0.76 :dark-oldest 0.26
+       :light-newest 0.26 :light-oldest 0.82
+       :saturation-min 0.40 :saturation-max 0.76))
     ('green
      '(:hue 120 :dark-newest 0.70 :dark-oldest 0.35
        :light-newest 0.40 :light-oldest 0.75
@@ -474,17 +528,25 @@ Returns: integer days limit or nil."
        :light-newest 0.55 :light-oldest 0.70
        :saturation-min 0.20 :saturation-max 0.45))
     ('vivid
-     '(:hue 210 :dark-newest 0.80 :dark-oldest 0.30
-       :light-newest 0.30 :light-oldest 0.80
-       :saturation-min 0.50 :saturation-max 0.80))
+     '(:hue 198 :dark-newest 0.80 :dark-oldest 0.22
+       :light-newest 0.22 :light-oldest 0.86
+       :saturation-min 0.48 :saturation-max 0.88))
     (_ blame-reveal-color-scheme)))
 
 (defun blame-reveal--apply-color-preset (preset)
   "Apply the color scheme PRESET by setting `blame-reveal-color-scheme'
   to the corresponding plist value."
   (interactive)
-  (let ((new-scheme-plist (blame-reveal--get-color-scheme-plist preset)))
-    (customize-set-variable 'blame-reveal-color-scheme new-scheme-plist)
+  (let ((set-config (if (fboundp 'blame-reveal--set-config-value)
+                        #'blame-reveal--set-config-value
+                        #'customize-set-variable)))
+    (if (eq preset 'heatmap)
+        (funcall set-config 'blame-reveal-color-mode 'heatmap)
+      (let ((new-scheme-plist (blame-reveal--get-color-scheme-plist preset)))
+        (funcall set-config 'blame-reveal-color-mode 'gradient)
+        (funcall set-config 'blame-reveal-color-scheme new-scheme-plist)))
+    (when (fboundp 'blame-reveal--refresh-active-color-displays)
+      (blame-reveal--refresh-active-color-displays))
     (blame-reveal--force-update-header)
     (message "Applied color preset: %s" preset)))
 

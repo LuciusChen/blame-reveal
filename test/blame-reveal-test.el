@@ -18,6 +18,7 @@
 (require 'blame-reveal)
 (require 'blame-reveal-focus)
 (require 'blame-reveal-recursive)
+(require 'blame-reveal-transient)
 
 (ert-deftest blame-reveal-mode-map-keeps-focus-navigation-under-prefix ()
   "Focus commands should stay under the `C-c l' prefix."
@@ -30,6 +31,191 @@
   (should-not (lookup-key blame-reveal-mode-map (kbd "F")))
   (should-not (lookup-key blame-reveal-mode-map (kbd "n")))
   (should-not (lookup-key blame-reveal-mode-map (kbd "N"))))
+
+(ert-deftest blame-reveal-heatmap-strategy-uses-six-distinct-warm-to-cool-steps ()
+  "Heatmap strategy should keep six recent commits visually distinct."
+  (let ((strategy (blame-reveal-heatmap-strategy-create)))
+    (should
+     (equal
+      (cl-loop for rank from 0 below 6
+               collect (blame-reveal-color-calculate
+                        strategy nil `(:rank ,rank :total-recent 6 :is-dark t)))
+      '("#ff6b4a" "#ff9350" "#ffc857" "#93c25f" "#5aa6ad" "#6178ad")))
+    (should
+     (equal
+      (cl-loop for rank from 0 below 6
+               collect (blame-reveal-color-calculate
+                        strategy nil `(:rank ,rank :total-recent 6 :is-dark nil)))
+      '("#c2412d" "#d96a1c" "#b88a00" "#6f8c34" "#3c8088" "#5368a8")))
+    (should (equal (blame-reveal-color-old strategy '(:is-dark t)) "#46546a"))
+    (should (equal (blame-reveal-color-old strategy '(:is-dark nil)) "#c8ced7"))))
+
+(ert-deftest blame-reveal-apply-color-preset-heatmap-switches-color-mode ()
+  "Heatmap preset should switch to the dedicated heatmap color mode."
+  (let (customized
+        (refresh-calls 0))
+    (cl-letf (((symbol-function 'blame-reveal--set-config-value)
+               (lambda (symbol value)
+                 (push (cons symbol value) customized)))
+              ((symbol-function 'blame-reveal--refresh-active-color-displays)
+               (lambda ()
+                 (setq refresh-calls (1+ refresh-calls))))
+              ((symbol-function 'blame-reveal--force-update-header)
+               #'ignore)
+              ((symbol-function 'message)
+               #'ignore))
+      (blame-reveal--apply-color-preset 'heatmap)
+      (should (member '(blame-reveal-color-mode . heatmap) customized))
+      (should (= refresh-calls 1)))))
+
+(ert-deftest blame-reveal-recent-window-settings-prefer-outcomes-over-knobs ()
+  "Recent window presets should map to stable days/quality pairs."
+  (should (equal (blame-reveal--recent-window-settings 'tight)
+                 '(:days-limit 30 :gradient-quality strict)))
+  (should (equal (blame-reveal--recent-window-settings 'balanced)
+                 '(:days-limit auto :gradient-quality auto)))
+  (should (equal (blame-reveal--recent-window-settings 'wide)
+                 '(:days-limit 180 :gradient-quality relaxed)))
+  (should (equal (blame-reveal--recent-window-settings 'all)
+                 '(:days-limit nil :gradient-quality relaxed))))
+
+(ert-deftest blame-reveal-apply-preset-default-selects-green-gradient ()
+  "Default preset should use the green gradient baseline."
+  (let ((blame-reveal-header-style 'inline)
+        (blame-reveal-recent-days-limit 30)
+        (blame-reveal-gradient-quality 'strict)
+        (blame-reveal-fringe-side 'right-fringe)
+        (blame-reveal-color-mode 'heatmap)
+        (blame-reveal-color-scheme '(:hue 200))
+        (blame-reveal-mode nil))
+    (cl-letf (((symbol-function 'message) #'ignore))
+      (blame-reveal--apply-preset-default)
+      (should (eq blame-reveal-header-style 'inline))
+      (should (eq blame-reveal-recent-days-limit 'auto))
+      (should (eq blame-reveal-gradient-quality 'auto))
+      (should (eq blame-reveal-fringe-side 'left-fringe))
+      (should (eq blame-reveal-color-mode 'gradient))
+      (should (equal blame-reveal-color-scheme
+                     '(:hue 120
+                       :dark-newest 0.70 :dark-oldest 0.35
+                       :light-newest 0.40 :light-oldest 0.75
+                       :saturation-min 0.25 :saturation-max 0.60))))))
+
+(ert-deftest blame-reveal-header-style-defaults-to-inline ()
+  "Default header style should be inline."
+  (should (eq (default-value 'blame-reveal-header-style) 'inline)))
+
+(ert-deftest blame-reveal-color-scheme-defaults-to-green-gradient ()
+  "Default gradient scheme should use the green baseline."
+  (should (equal (default-value 'blame-reveal-color-scheme)
+                 '(:hue 120
+                   :dark-newest 0.70 :dark-oldest 0.35
+                   :light-newest 0.40 :light-oldest 0.75
+                   :saturation-min 0.25 :saturation-max 0.60))))
+
+(ert-deftest blame-reveal-set-color-scheme-component-uses-scope-aware-setter ()
+  "High-level color edits should use the shared setter and refresh path."
+  (let ((captured nil)
+        (refresh-calls 0)
+        (blame-reveal-color-scheme
+         '(:hue 200 :dark-newest 0.76 :dark-oldest 0.26
+           :light-newest 0.26 :light-oldest 0.82
+           :saturation-min 0.40 :saturation-max 0.76)))
+    (cl-letf (((symbol-function 'blame-reveal--set-config-value)
+               (lambda (symbol value)
+                 (setq captured (cons symbol value))))
+              ((symbol-function 'blame-reveal--refresh-colors-after-setting-change)
+               (lambda ()
+                 (setq refresh-calls (1+ refresh-calls)))))
+      (blame-reveal--set-color-scheme-component :hue 120)
+      (should (equal (car captured) 'blame-reveal-color-scheme))
+      (should (equal (plist-get (cdr captured) :hue) 120))
+      (should (= refresh-calls 1)))))
+
+(ert-deftest blame-reveal-set-header-style-refreshes-all-active-buffers-in-global-scope ()
+  "Global-scope header-style changes should refresh every active blame buffer."
+  (let ((buf-a (generate-new-buffer " *blame-reveal-a*"))
+        (buf-b (generate-new-buffer " *blame-reveal-b*"))
+        refreshed)
+    (unwind-protect
+        (with-current-buffer buf-a
+          (setq-local blame-reveal-mode t)
+          (setq buffer-file-name "/tmp/a.el")
+          (kill-local-variable 'blame-reveal-header-style)
+          (with-current-buffer buf-b
+            (setq-local blame-reveal-mode t)
+            (setq buffer-file-name "/tmp/b.el"))
+          (cl-letf (((symbol-function 'transient-setup) #'ignore)
+                    ((symbol-function 'blame-reveal--restore-window-margins)
+                     #'ignore)
+                    ((symbol-function 'blame-reveal--ensure-window-margins)
+                     #'ignore)
+                    ((symbol-function 'blame-reveal--force-update-header)
+                     (lambda ()
+                       (push (buffer-name) refreshed))))
+            (blame-reveal--set-header-style 'inline)
+            (should (equal (sort refreshed #'string<)
+                           (sort (list (buffer-name buf-a)
+                                       (buffer-name buf-b))
+                                 #'string<)))))
+      (kill-buffer buf-a)
+      (kill-buffer buf-b))))
+
+(ert-deftest blame-reveal-apply-recent-window-preset-refreshes-all-active-buffers-in-global-scope ()
+  "Global recent-window changes should update all active blame buffers."
+  (let ((buf-a (generate-new-buffer " *blame-reveal-a*"))
+        (buf-b (generate-new-buffer " *blame-reveal-b*"))
+        refreshed)
+    (unwind-protect
+        (with-current-buffer buf-a
+          (setq-local blame-reveal-mode t)
+          (setq buffer-file-name "/tmp/a.el")
+          (kill-local-variable 'blame-reveal-recent-days-limit)
+          (with-current-buffer buf-b
+            (setq-local blame-reveal-mode t)
+            (setq buffer-file-name "/tmp/b.el"))
+          (cl-letf (((symbol-function 'message) #'ignore)
+                    ((symbol-function 'blame-reveal--update-recent-commits)
+                     (lambda ()
+                       (push (list (buffer-name) 'recent) refreshed)))
+                    ((symbol-function 'blame-reveal--recolor-and-render)
+                     (lambda ()
+                       (push (list (buffer-name) 'render) refreshed)))
+                    ((symbol-function 'blame-reveal--force-update-header)
+                     (lambda ()
+                       (push (list (buffer-name) 'header) refreshed))))
+            (blame-reveal--apply-recent-window-preset 'tight)
+            (dolist (buffer (list buf-a buf-b))
+              (should (member (list (buffer-name buffer) 'recent) refreshed))
+              (should (member (list (buffer-name buffer) 'render) refreshed))
+              (should (member (list (buffer-name buffer) 'header) refreshed)))))
+      (kill-buffer buf-a)
+      (kill-buffer buf-b))))
+
+(ert-deftest blame-reveal-apply-preset-default-refreshes-all-active-buffers-in-global-scope ()
+  "Global preset changes should fully refresh every active blame buffer."
+  (let ((buf-a (generate-new-buffer " *blame-reveal-a*"))
+        (buf-b (generate-new-buffer " *blame-reveal-b*"))
+        refreshed)
+    (unwind-protect
+        (with-current-buffer buf-a
+          (setq-local blame-reveal-mode t)
+          (setq buffer-file-name "/tmp/a.el")
+          (kill-local-variable 'blame-reveal-header-style)
+          (with-current-buffer buf-b
+            (setq-local blame-reveal-mode t)
+            (setq buffer-file-name "/tmp/b.el"))
+          (cl-letf (((symbol-function 'message) #'ignore)
+                    ((symbol-function 'blame-reveal--full-update)
+                     (lambda ()
+                       (push (buffer-name) refreshed))))
+            (blame-reveal--apply-preset-default)
+            (should (equal (sort refreshed #'string<)
+                           (sort (list (buffer-name buf-a)
+                                       (buffer-name buf-b))
+                                 #'string<)))))
+      (kill-buffer buf-a)
+      (kill-buffer buf-b))))
 
 (ert-deftest blame-reveal-turn-on-mode-skips-ineligible-buffers ()
   "Global enable helper should ignore buffers that should not opt in."
@@ -224,11 +410,14 @@
   (with-temp-buffer
     (let ((cleared nil)
           (render-calls 0)
+          (clear-header-state-calls 0)
           (header-calls 0)
           (messages nil)
+          (original-header-line "existing header")
           (blame-reveal-mode t)
           (blame-reveal--current-block-commit nil)
           (blame-reveal--last-rendered-commit 'stale))
+      (setq header-line-format original-header-line)
       (setq blame-reveal--commit-info (make-hash-table :test 'equal))
       (puthash "abcdef0123456789"
                '("abcdef0" "Ada" "2d" "Refactor focus mode" 0 "")
@@ -247,6 +436,11 @@
                 ((symbol-function 'blame-reveal--render-visible-region)
                  (lambda ()
                    (setq render-calls (1+ render-calls))))
+                ((symbol-function 'blame-reveal--clear-header-state)
+                 (lambda ()
+                   (setq clear-header-state-calls (1+ clear-header-state-calls))
+                   (setq blame-reveal--current-block-commit nil
+                         blame-reveal--last-rendered-commit nil)))
                 ((symbol-function 'blame-reveal--update-header)
                  (lambda ()
                    (setq header-calls (1+ header-calls))))
@@ -255,10 +449,14 @@
                    (push (apply #'format fmt args) messages))))
         (blame-reveal-focus--enter "abcdef0123456789")
         (should (equal blame-reveal--focused-commit "abcdef0123456789"))
-        (should (equal blame-reveal--current-block-commit "abcdef0123456789"))
+        (should-not blame-reveal--current-block-commit)
+        (should (stringp header-line-format))
+        (should (string-match-p "Focus:" header-line-format))
+        (should (string-match-p "abcdef0" header-line-format))
         (should (equal cleared '(temp-fringe fringe)))
         (should (= render-calls 1))
-        (should (= header-calls 1))
+        (should (= clear-header-state-calls 1))
+        (should (= header-calls 0))
         (should (string-match-p "C-c l f" (car messages)))
 
         (setq cleared nil
@@ -268,9 +466,93 @@
         (should-not blame-reveal--focus-block-cache)
         (should-not blame-reveal--current-block-commit)
         (should-not blame-reveal--last-rendered-commit)
+        (should (equal header-line-format original-header-line))
         (should (equal cleared '(fringe)))
         (should (= render-calls 2))
+        (should (= clear-header-state-calls 1))
+        (should (= header-calls 1))
         (should (equal (car messages) "Focus mode exited"))))))
+
+(ert-deftest blame-reveal-focus-setup-suppresses-regular-header-displays ()
+  "Focus integration should suppress regular header and sticky overlays."
+  (unwind-protect
+      (progn
+        (blame-reveal-focus--setup)
+        (should (advice-member-p #'blame-reveal-focus--around-render-visible-region
+                                 'blame-reveal--render-visible-region))
+        (should (advice-member-p #'blame-reveal-focus--around-update-header
+                                 'blame-reveal--update-header))
+        (should (advice-member-p #'blame-reveal-focus--around-update-sticky-header
+                                 'blame-reveal--update-sticky-header))
+        (should-not (advice-member-p #'blame-reveal-focus--around-get-current-block
+                                     'blame-reveal--get-current-block)))
+    (blame-reveal-focus--teardown)))
+
+(ert-deftest blame-reveal-focus-setup-reference-counts-global-integration ()
+  "Focus setup/teardown should keep global advice installed until the last user exits."
+  (unwind-protect
+      (progn
+        (blame-reveal-focus--teardown)
+        (blame-reveal-focus--setup)
+        (blame-reveal-focus--setup)
+        (blame-reveal-focus--teardown)
+        (should (advice-member-p #'blame-reveal-focus--around-render-visible-region
+                                 'blame-reveal--render-visible-region))
+        (should (advice-member-p #'blame-reveal-focus--around-update-header
+                                 'blame-reveal--update-header))
+        (blame-reveal-focus--teardown)
+        (should-not (advice-member-p #'blame-reveal-focus--around-render-visible-region
+                                     'blame-reveal--render-visible-region))
+        (should-not (advice-member-p #'blame-reveal-focus--around-update-header
+                                     'blame-reveal--update-header)))
+    (blame-reveal-focus--teardown)))
+
+(ert-deftest blame-reveal-focus-restores-header-line-updates-made-while-active ()
+  "Focus mode should not clobber header-line changes made while it is active."
+  (with-temp-buffer
+    (let ((blame-reveal-mode t)
+          (header-calls 0)
+          pending-refresh)
+      (unwind-protect
+          (progn
+            (blame-reveal-focus--setup)
+            (setq header-line-format "existing header")
+            (setq blame-reveal--commit-info (make-hash-table :test 'equal))
+            (puthash "abcdef0123456789"
+                     '("abcdef0" "Ada" "2d" "Refactor focus mode" 0 "")
+                     blame-reveal--commit-info)
+            (cl-letf (((symbol-function 'blame-reveal-focus--update-block-cache)
+                      (lambda ()
+                         (setq blame-reveal--focus-block-cache
+                               '((10 "abcdef0123456789" 2)))))
+                      ((symbol-function 'run-with-timer)
+                       (lambda (_secs _repeat function &rest args)
+                         (setq pending-refresh (lambda () (apply function args)))
+                         'focus-test-timer))
+                      ((symbol-function 'cancel-timer)
+                       #'ignore)
+                      ((symbol-function 'blame-reveal-focus--render-visible-region)
+                       #'ignore)
+                      ((symbol-function 'blame-reveal--clear-overlays-by-type)
+                       #'ignore)
+                      ((symbol-function 'blame-reveal--clear-header-state)
+                       #'ignore)
+                      ((symbol-function 'blame-reveal--render-visible-region)
+                       #'ignore)
+                      ((symbol-function 'blame-reveal--update-header)
+                       (lambda ()
+                         (setq header-calls (1+ header-calls))))
+                      ((symbol-function 'message)
+                       #'ignore))
+              (blame-reveal-focus--enter "abcdef0123456789")
+              (setq header-line-format "external header")
+              (funcall pending-refresh)
+              (should (stringp header-line-format))
+              (should (string-match-p "Focus:" header-line-format))
+              (blame-reveal-focus--exit)
+              (should (equal header-line-format "external header"))
+              (should (= header-calls 1))))
+        (blame-reveal-focus--teardown)))))
 
 (ert-deftest blame-reveal-save-current-state-seeds-head-foundation ()
   "First recursive save from HEAD should include a dedicated HEAD base state."

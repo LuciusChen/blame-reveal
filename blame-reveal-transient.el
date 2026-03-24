@@ -39,6 +39,8 @@
 
 (defconst blame-reveal--config-variables
   '(blame-reveal-header-style
+    blame-reveal-color-mode
+    blame-reveal-color-scheme
     blame-reveal-recent-days-limit
     blame-reveal-gradient-quality
     blame-reveal-fringe-side
@@ -61,6 +63,26 @@
 (defsubst blame-reveal--margin-active-p ()
   "Check if margin mode is active."
   (eq blame-reveal-header-style 'margin))
+
+(defun blame-reveal--set-config-value (variable value)
+  "Set VARIABLE to VALUE, respecting current buffer-local scope."
+  (if (local-variable-p variable)
+      (set (make-local-variable variable) value)
+    (set variable value)))
+
+(defun blame-reveal--config-target-buffers ()
+  "Return buffers that should refresh for the current configuration scope."
+  (if (blame-reveal--buffer-local-p)
+      (and blame-reveal-mode (list (current-buffer)))
+    (cl-loop for buffer in (buffer-list)
+             when (buffer-local-value 'blame-reveal-mode buffer)
+             collect buffer)))
+
+(defun blame-reveal--run-in-config-target-buffers (fn)
+  "Call FN in each buffer affected by the current configuration scope."
+  (dolist (buffer (blame-reveal--config-target-buffers))
+    (with-current-buffer buffer
+      (funcall fn))))
 
 (defun blame-reveal--format-scope ()
   "Format scope indicator (cached)."
@@ -179,6 +201,106 @@ Now uses unified flicker-free system - no special handling needed."
         (make-local-variable var))
       (message "Switched to buffer-local scope"))))
 
+(defun blame-reveal--recent-window-settings (preset)
+  "Return settings plist for recent-window PRESET."
+  (pcase preset
+    ('tight '(:days-limit 30 :gradient-quality strict))
+    ('balanced '(:days-limit auto :gradient-quality auto))
+    ('wide '(:days-limit 180 :gradient-quality relaxed))
+    ('all '(:days-limit nil :gradient-quality relaxed))
+    (_ '(:days-limit auto :gradient-quality auto))))
+
+(defun blame-reveal--refresh-colors-after-setting-change ()
+  "Refresh commit selection and colors after a high-level color change."
+  (blame-reveal--run-in-config-target-buffers
+   (lambda ()
+     (blame-reveal--update-recent-commits)
+     (blame-reveal--recolor-and-render)
+     (blame-reveal--force-update-header))))
+
+(defun blame-reveal--refresh-header-layout-after-setting-change ()
+  "Refresh header layout in every affected buffer."
+  (blame-reveal--run-in-config-target-buffers
+   (lambda ()
+     (if (eq blame-reveal-header-style 'margin)
+         (blame-reveal--ensure-window-margins)
+       (blame-reveal--restore-window-margins))
+     (blame-reveal--force-update-header))))
+
+(defun blame-reveal--refresh-fringe-after-setting-change ()
+  "Refresh fringe rendering in every affected buffer."
+  (blame-reveal--run-in-config-target-buffers
+   (lambda ()
+     (blame-reveal--recolor-and-render)
+     (blame-reveal--force-update-header))))
+
+(defun blame-reveal--refresh-margin-side-after-setting-change ()
+  "Refresh margin placement in every affected margin buffer."
+  (blame-reveal--run-in-config-target-buffers
+   (lambda ()
+     (when (eq blame-reveal-header-style 'margin)
+       (blame-reveal--restore-window-margins)
+       (blame-reveal--ensure-window-margins)
+       (blame-reveal--force-update-header)))))
+
+(defun blame-reveal--full-update-config-target-buffers ()
+  "Run `blame-reveal--full-update' in every affected buffer."
+  (blame-reveal--run-in-config-target-buffers #'blame-reveal--full-update))
+
+(defun blame-reveal--set-color-scheme-component (key value)
+  "Update color-scheme KEY to VALUE via the shared setter and refresh path."
+  (blame-reveal--set-config-value
+   'blame-reveal-color-scheme
+   (plist-put (copy-sequence blame-reveal-color-scheme) key value))
+  (blame-reveal--refresh-colors-after-setting-change))
+
+(defun blame-reveal--apply-preset-settings (&rest settings)
+  "Apply SETTINGS as variable/value pairs with scope awareness."
+  (cl-loop for (variable value) on settings by #'cddr
+           do (blame-reveal--set-config-value variable value)))
+
+(defconst blame-reveal--preset-settings
+  '((default
+      blame-reveal-header-style inline
+      blame-reveal-recent-days-limit auto
+      blame-reveal-gradient-quality auto
+      blame-reveal-fringe-side left-fringe
+      blame-reveal-color-mode gradient
+      blame-reveal-color-scheme
+      (:hue 120
+       :dark-newest 0.70 :dark-oldest 0.35
+       :light-newest 0.40 :light-oldest 0.75
+       :saturation-min 0.25 :saturation-max 0.60))
+    (compact
+      blame-reveal-header-style inline
+      blame-reveal-recent-days-limit 90
+      blame-reveal-gradient-quality strict
+      blame-reveal-fringe-side left-fringe)
+    (minimal
+      blame-reveal-header-style margin
+      blame-reveal-recent-days-limit 30
+      blame-reveal-show-uncommitted-fringe nil
+      blame-reveal-gradient-quality relaxed))
+  "High-level preset definitions as flat variable/value pairs.")
+
+(defun blame-reveal--apply-preset (preset)
+  "Apply PRESET from `blame-reveal--preset-settings'."
+  (when-let* ((settings (cdr (assq preset blame-reveal--preset-settings))))
+    (apply #'blame-reveal--apply-preset-settings settings)))
+
+(transient-define-suffix blame-reveal--apply-recent-window-preset (preset)
+  "Apply a high-level recent-window PRESET."
+  (interactive)
+  (let ((settings (blame-reveal--recent-window-settings preset)))
+    (blame-reveal--set-config-value
+     'blame-reveal-recent-days-limit
+     (plist-get settings :days-limit))
+    (blame-reveal--set-config-value
+     'blame-reveal-gradient-quality
+     (plist-get settings :gradient-quality))
+    (blame-reveal--refresh-colors-after-setting-change)
+    (message "Recent window: %s" preset)))
+
 ;;; Auto-refresh after header-style change
 
 (cl-defmethod transient-infix-set :after ((obj blame-reveal-lisp-variable) _value)
@@ -188,16 +310,11 @@ Now uses unified flicker-free system - no special handling needed."
      ;; Days limit or gradient quality changed
      ((or (eq var 'blame-reveal-recent-days-limit)
           (eq var 'blame-reveal-gradient-quality))
-      (when (and (boundp 'blame-reveal-mode) blame-reveal-mode)
-        (blame-reveal--update-recent-commits)
-        (blame-reveal--recolor-and-render)
-        (blame-reveal--force-update-header)))
+      (blame-reveal--refresh-colors-after-setting-change))
 
      ;; Uncommitted fringe
      ((eq var 'blame-reveal-show-uncommitted-fringe)
-      (when (and (boundp 'blame-reveal-mode) blame-reveal-mode)
-        (blame-reveal--recolor-and-render)
-        (blame-reveal--force-update-header)))
+      (blame-reveal--refresh-fringe-after-setting-change))
 
      ;; Lazy threshold or async blame
      ((or (eq var 'blame-reveal-lazy-load-threshold)
@@ -210,37 +327,23 @@ Now uses unified flicker-free system - no special handling needed."
 (transient-define-suffix blame-reveal--set-header-style (style)
   "Set header style to STYLE and update immediately."
   (interactive)
-  (setq blame-reveal-header-style style)
-  (when (and (boundp 'blame-reveal-mode) blame-reveal-mode)
-    ;; Restore margins when switching away from margin
-    (when (not (eq style 'margin))
-      (blame-reveal--restore-window-margins))
-    ;; Setup margins when switching to margin
-    (when (eq style 'margin)
-      (blame-reveal--ensure-window-margins))
-    ;; Force immediate header refresh
-    (blame-reveal--force-update-header))
+  (blame-reveal--set-config-value 'blame-reveal-header-style style)
+  (blame-reveal--refresh-header-layout-after-setting-change)
   ;; Return to main menu
   (transient-setup 'blame-reveal-menu))
 
 (transient-define-suffix blame-reveal--set-fringe-side (side)
   "Set fringe side to SIDE and update immediately."
   (interactive)
-  (setq blame-reveal-fringe-side side)
-  (when (and (boundp 'blame-reveal-mode) blame-reveal-mode)
-    (blame-reveal--recolor-and-render)
-    (blame-reveal--force-update-header))
+  (blame-reveal--set-config-value 'blame-reveal-fringe-side side)
+  (blame-reveal--refresh-fringe-after-setting-change)
   (transient-setup 'blame-reveal-menu))
 
 (transient-define-suffix blame-reveal--set-margin-side (side)
   "Set margin side to SIDE and update immediately."
   (interactive)
-  (setq blame-reveal-margin-side side)
-  (when (and (boundp 'blame-reveal-mode) blame-reveal-mode
-             (eq blame-reveal-header-style 'margin))
-    (blame-reveal--restore-window-margins)
-    (blame-reveal--ensure-window-margins)
-    (blame-reveal--force-update-header))
+  (blame-reveal--set-config-value 'blame-reveal-margin-side side)
+  (blame-reveal--refresh-margin-side-after-setting-change)
   (transient-setup 'blame-reveal-menu))
 
 ;;; Move/Copy Detection
@@ -302,10 +405,7 @@ Now uses unified flicker-free system - no special handling needed."
   (interactive)
   (let* ((current (plist-get blame-reveal-color-scheme :hue))
          (new (read-number (format "Hue (0-360, current: %d): " current) current)))
-    (setq blame-reveal-color-scheme
-          (plist-put (copy-sequence blame-reveal-color-scheme) :hue new))
-    (when blame-reveal-mode
-      (blame-reveal--recolor-and-render))))
+    (blame-reveal--set-color-scheme-component :hue new)))
 
 (transient-define-suffix blame-reveal--edit-dark-newest ()
   "Edit dark theme newest lightness."
@@ -313,10 +413,7 @@ Now uses unified flicker-free system - no special handling needed."
   (interactive)
   (let* ((current (plist-get blame-reveal-color-scheme :dark-newest))
          (new (read-number (format "Dark newest (current: %.2f): " current) current)))
-    (setq blame-reveal-color-scheme
-          (plist-put (copy-sequence blame-reveal-color-scheme) :dark-newest new))
-    (when blame-reveal-mode
-      (blame-reveal--recolor-and-render))))
+    (blame-reveal--set-color-scheme-component :dark-newest new)))
 
 (transient-define-suffix blame-reveal--edit-dark-oldest ()
   "Edit dark theme oldest lightness."
@@ -324,10 +421,7 @@ Now uses unified flicker-free system - no special handling needed."
   (interactive)
   (let* ((current (plist-get blame-reveal-color-scheme :dark-oldest))
          (new (read-number (format "Dark oldest (current: %.2f): " current) current)))
-    (setq blame-reveal-color-scheme
-          (plist-put (copy-sequence blame-reveal-color-scheme) :dark-oldest new))
-    (when blame-reveal-mode
-      (blame-reveal--recolor-and-render))))
+    (blame-reveal--set-color-scheme-component :dark-oldest new)))
 
 (transient-define-suffix blame-reveal--edit-light-newest ()
   "Edit light theme newest lightness."
@@ -335,10 +429,7 @@ Now uses unified flicker-free system - no special handling needed."
   (interactive)
   (let* ((current (plist-get blame-reveal-color-scheme :light-newest))
          (new (read-number (format "Light newest (current: %.2f): " current) current)))
-    (setq blame-reveal-color-scheme
-          (plist-put (copy-sequence blame-reveal-color-scheme) :light-newest new))
-    (when blame-reveal-mode
-      (blame-reveal--recolor-and-render))))
+    (blame-reveal--set-color-scheme-component :light-newest new)))
 
 (transient-define-suffix blame-reveal--edit-light-oldest ()
   "Edit light theme oldest lightness."
@@ -346,10 +437,7 @@ Now uses unified flicker-free system - no special handling needed."
   (interactive)
   (let* ((current (plist-get blame-reveal-color-scheme :light-oldest))
          (new (read-number (format "Light oldest (current: %.2f): " current) current)))
-    (setq blame-reveal-color-scheme
-          (plist-put (copy-sequence blame-reveal-color-scheme) :light-oldest new))
-    (when blame-reveal-mode
-      (blame-reveal--recolor-and-render))))
+    (blame-reveal--set-color-scheme-component :light-oldest new)))
 
 (transient-define-suffix blame-reveal--edit-sat-min ()
   "Edit saturation minimum."
@@ -357,10 +445,7 @@ Now uses unified flicker-free system - no special handling needed."
   (interactive)
   (let* ((current (plist-get blame-reveal-color-scheme :saturation-min))
          (new (read-number (format "Saturation min (current: %.2f): " current) current)))
-    (setq blame-reveal-color-scheme
-          (plist-put (copy-sequence blame-reveal-color-scheme) :saturation-min new))
-    (when blame-reveal-mode
-      (blame-reveal--recolor-and-render))))
+    (blame-reveal--set-color-scheme-component :saturation-min new)))
 
 (transient-define-suffix blame-reveal--edit-sat-max ()
   "Edit saturation maximum."
@@ -368,10 +453,34 @@ Now uses unified flicker-free system - no special handling needed."
   (interactive)
   (let* ((current (plist-get blame-reveal-color-scheme :saturation-max))
          (new (read-number (format "Saturation max (current: %.2f): " current) current)))
-    (setq blame-reveal-color-scheme
-          (plist-put (copy-sequence blame-reveal-color-scheme) :saturation-max new))
-    (when blame-reveal-mode
-      (blame-reveal--recolor-and-render))))
+    (blame-reveal--set-color-scheme-component :saturation-max new)))
+
+(transient-define-prefix blame-reveal-color-advanced-menu ()
+  "Fine-tune low-level gradient parameters."
+  [:description "Advanced Gradient Tuning"
+   ["Hue"
+    ("h" "Hue (0-360)" blame-reveal--edit-hue)]
+   ["Dark Theme"
+    ("n" "Newest"      blame-reveal--edit-dark-newest)
+    ("o" "Oldest"      blame-reveal--edit-dark-oldest)]
+   ["Light Theme"
+    ("N" "Newest"      blame-reveal--edit-light-newest)
+    ("O" "Oldest"      blame-reveal--edit-light-oldest)]
+   ["Saturation"
+    ("s" "Min"         blame-reveal--edit-sat-min)
+    ("S" "Max"         blame-reveal--edit-sat-max)]]
+  [["Actions"
+    ("q" "Back" transient-quit-one)]])
+
+(transient-define-prefix blame-reveal-recent-window-menu ()
+  "Select how much recent history should stay highlighted."
+  ["Recent Window"
+   ("t" "Tight"    (lambda () (interactive) (blame-reveal--apply-recent-window-preset 'tight)))
+   ("b" "Balanced" (lambda () (interactive) (blame-reveal--apply-recent-window-preset 'balanced)))
+   ("w" "Wide"     (lambda () (interactive) (blame-reveal--apply-recent-window-preset 'wide)))
+   ("a" "All"      (lambda () (interactive) (blame-reveal--apply-recent-window-preset 'all)))]
+  ["Actions"
+   ("q" "Back" transient-quit-one)])
 
 (transient-define-prefix blame-reveal-header-style-menu ()
   "Select header display style."
@@ -415,26 +524,21 @@ Now uses unified flicker-free system - no special handling needed."
 (transient-define-prefix blame-reveal-color-scheme-menu ()
   "Configure color scheme."
   [:description
-   (lambda () (format "Color Scheme [H:%d°]"
-                      (plist-get blame-reveal-color-scheme :hue)))
+   (lambda ()
+     (if (eq blame-reveal-color-mode 'heatmap)
+         "Color Scheme [Heatmap]"
+       (format "Color Scheme [Gradient H:%d°]"
+               (plist-get blame-reveal-color-scheme :hue))))
    ["Quick Presets"
     ("1" "Blue"   (lambda () (interactive) (blame-reveal--apply-color-preset 'blue))   :transient t)
     ("2" "Green"  (lambda () (interactive) (blame-reveal--apply-color-preset 'green))  :transient t)
     ("3" "Purple" (lambda () (interactive) (blame-reveal--apply-color-preset 'purple)) :transient t)
     ("4" "Orange" (lambda () (interactive) (blame-reveal--apply-color-preset 'orange)) :transient t)
     ("5" "Subtle" (lambda () (interactive) (blame-reveal--apply-color-preset 'subtle)) :transient t)
-    ("6" "Vivid"  (lambda () (interactive) (blame-reveal--apply-color-preset 'vivid))  :transient t)]
-   ["Hue"
-    ("h" "Hue (0-360)" blame-reveal--edit-hue)]
-   ["Dark Theme"
-    ("n" "Newest"      blame-reveal--edit-dark-newest)
-    ("o" "Oldest"      blame-reveal--edit-dark-oldest)]
-   ["Light Theme"
-    ("N" "Newest"      blame-reveal--edit-light-newest)
-    ("O" "Oldest"      blame-reveal--edit-light-oldest)]
-   ["Saturation"
-    ("s" "Min"         blame-reveal--edit-sat-min)
-    ("S" "Max"         blame-reveal--edit-sat-max)]]
+    ("6" "Vivid"  (lambda () (interactive) (blame-reveal--apply-color-preset 'vivid))  :transient t)
+    ("7" "Heatmap" (lambda () (interactive) (blame-reveal--apply-color-preset 'heatmap)) :transient t)]
+   ["More"
+    ("A" "Advanced tuning..." blame-reveal-color-advanced-menu)]]
   [["Actions"
     ("R" "Refresh"     blame-reveal--full-update :transient t)
     ("q" "Back"        transient-quit-one)]])
@@ -483,12 +587,8 @@ Now uses unified flicker-free system - no special handling needed."
   :description "Default preset"
   :transient t
   (interactive)
-  (setq blame-reveal-header-style 'block
-        blame-reveal-recent-days-limit 'auto
-        blame-reveal-gradient-quality 'auto
-        blame-reveal-fringe-side 'left-fringe)
-  (when blame-reveal-mode
-    (blame-reveal--full-update))
+  (blame-reveal--apply-preset 'default)
+  (blame-reveal--full-update-config-target-buffers)
   (message "Applied default preset"))
 
 (transient-define-suffix blame-reveal--apply-preset-compact ()
@@ -497,12 +597,8 @@ Now uses unified flicker-free system - no special handling needed."
   :description "Compact preset"
   :transient t
   (interactive)
-  (setq blame-reveal-header-style 'inline
-        blame-reveal-recent-days-limit 90
-        blame-reveal-gradient-quality 'strict
-        blame-reveal-fringe-side 'left-fringe)
-  (when blame-reveal-mode
-    (blame-reveal--full-update))
+  (blame-reveal--apply-preset 'compact)
+  (blame-reveal--full-update-config-target-buffers)
   (message "Applied compact preset"))
 
 (transient-define-suffix blame-reveal--apply-preset-minimal ()
@@ -511,12 +607,8 @@ Now uses unified flicker-free system - no special handling needed."
   :description "Minimal preset"
   :transient t
   (interactive)
-  (setq blame-reveal-header-style 'margin
-        blame-reveal-recent-days-limit 30
-        blame-reveal-show-uncommitted-fringe nil
-        blame-reveal-gradient-quality 'relaxed)
-  (when blame-reveal-mode
-    (blame-reveal--full-update))
+  (blame-reveal--apply-preset 'minimal)
+  (blame-reveal--full-update-config-target-buffers)
   (message "Applied minimal preset"))
 
 ;;;###autoload
@@ -539,9 +631,8 @@ Now uses unified flicker-free system - no special handling needed."
     ("f" "Fringe side..."  blame-reveal-fringe-side-menu)
     ("m" "Margin side..."  blame-reveal-margin-side-menu)]
    ["Colors"
-    (blame-reveal--infix-days-limit)
-    (blame-reveal--infix-gradient-quality)
-    ("H" "Color scheme..." blame-reveal-color-scheme-menu)]
+    ("w" "Recent window..." blame-reveal-recent-window-menu)
+    ("H" "Color presets..." blame-reveal-color-scheme-menu)]
    ["Options"
     (blame-reveal--infix-show-uncommitted-fringe)
     (blame-reveal--infix-lazy-threshold)

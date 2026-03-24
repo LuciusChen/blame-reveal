@@ -30,8 +30,8 @@
 ;; Common Customizations:
 ;;   (setq blame-reveal-recent-days-limit 'auto)      ; Smart time window
 ;;   (setq blame-reveal-gradient-quality 'auto)       ; Balanced quality
-;;   (setq blame-reveal-header-style 'block)          ; Header format
-;;   (setq blame-reveal-color-scheme '(:hue 210 ...)) ; Color theme
+;;   (setq blame-reveal-header-style 'inline)         ; Header format
+;;   (setq blame-reveal-color-scheme '(:hue 120 ...)) ; Color theme
 ;;
 ;; See full documentation: https://github.com/lucius-chen/blame-reveal
 
@@ -286,7 +286,7 @@ This is the core visual element showing commit age with colors."
                  (const :tag "Right fringe" right-fringe))
   :group 'blame-reveal)
 
-(defcustom blame-reveal-header-style 'block
+(defcustom blame-reveal-header-style 'inline
   "How to display commit information header.
 
 Styles:
@@ -466,6 +466,26 @@ Tip: Use this package with diff-hl-mode for the best experience:
 
 ;;; Color Customization
 
+(defun blame-reveal--refresh-active-color-displays ()
+  "Recalculate colors in all active `blame-reveal-mode' buffers."
+  (when (boundp 'blame-reveal-mode)
+    (dolist (buffer (buffer-list))
+      (with-current-buffer buffer
+        (when blame-reveal-mode
+          (blame-reveal--recolor-and-render))))))
+
+(defcustom blame-reveal-color-mode 'gradient
+  "Color strategy used for recent commits.
+
+`gradient' uses a continuous single-hue gradient.
+`heatmap' uses a warm-to-cool age palette that favors quick visual scanning."
+  :type '(choice (const :tag "Gradient" gradient)
+                 (const :tag "Heatmap" heatmap))
+  :set (lambda (symbol value)
+         (set-default symbol value)
+         (blame-reveal--refresh-active-color-displays))
+  :group 'blame-reveal)
+
 (defcustom blame-reveal-recent-commit-color nil
   "Color for recent commits (within top N and time limit).
 If nil, uses automatic gradient based on commit rank.
@@ -488,10 +508,10 @@ Set to a color string like \"#888888\" to use a fixed color."
   :group 'blame-reveal)
 
 (defcustom blame-reveal-color-scheme
-  '(:hue 210
+  '(:hue 120
          :dark-newest 0.70
          :dark-oldest 0.35
-         :light-newest 0.45
+         :light-newest 0.40
          :light-oldest 0.75
          :saturation-min 0.25
          :saturation-max 0.60)
@@ -503,17 +523,16 @@ Light theme: newest commits are darker (lower lightness) to stand out
 
 Example schemes:
 
-  High contrast:
-  `(:hue 210
-    :dark-newest 0.75 :dark-oldest 0.30
-    :light-newest 0.35 :light-oldest 0.85
-    :saturation-min 0.35 :saturation-max 0.70)
-
-  Green:
   `(:hue 120
     :dark-newest 0.70 :dark-oldest 0.35
     :light-newest 0.40 :light-oldest 0.75
     :saturation-min 0.25 :saturation-max 0.60)
+
+  High contrast:
+  `(:hue 200
+    :dark-newest 0.76 :dark-oldest 0.26
+    :light-newest 0.26 :light-oldest 0.82
+    :saturation-min 0.40 :saturation-max 0.76)
 
   Purple:
   `(:hue 280
@@ -529,11 +548,7 @@ Example schemes:
   :type 'plist
   :set (lambda (symbol value)
          (set-default symbol value)
-         (when (and (boundp 'blame-reveal-mode) blame-reveal-mode)
-           (dolist (buffer (buffer-list))
-             (with-current-buffer buffer
-               (when blame-reveal-mode
-                 (blame-reveal--recolor-and-render))))))
+         (blame-reveal--refresh-active-color-displays))
   :group 'blame-reveal)
 
 ;;; Performance Customization

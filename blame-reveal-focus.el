@@ -16,9 +16,9 @@
 ;; Features:
 ;; - Toggle focus mode to lock/unlock on a commit
 ;; - Highlight all lines belonging to the focused commit
-;; - Hide blame info for non-focused commits
+;; - Keep a persistent focus badge in the header line
 ;; - Navigate between focused commit blocks
-;; - Sticky header always shows focused commit info
+;; - Hide regular block/sticky headers while focus mode is active
 ;;
 ;; Implementation notes:
 ;; - Reuses existing overlay registry system (blame-reveal-overlay.el)
@@ -27,9 +27,9 @@
 ;; - Reuses existing block boundary detection (blame-reveal-core.el)
 ;;
 ;; Usage:
-;;   M-x blame-reveal-focus-commit  (or press 'F' in blame-reveal-mode)
-;;   M-x blame-reveal-next-focus-block (or press 'n' in focus mode)
-;;   M-x blame-reveal-prev-focus-block (or press 'N' in focus mode)
+;;   M-x blame-reveal-focus-commit
+;;   M-x blame-reveal-next-focus-block
+;;   M-x blame-reveal-prev-focus-block
 
 ;;; Code:
 
@@ -40,6 +40,8 @@
 (require 'blame-reveal-header)
 
 (defvar blame-reveal-mode nil)
+(defvar blame-reveal--focus-integration-refcount 0
+  "Number of buffers currently using focus integration.")
 
 ;;; Customization
 
@@ -78,6 +80,18 @@ are highlighted in the fringe.")
 Each element is `(START-LINE COMMIT-HASH LENGTH)' from
 `blame-reveal--find-block-boundaries'. Invalidated when focus changes.")
 
+(defvar-local blame-reveal--focus-saved-header-line-format nil
+  "Saved `header-line-format' value from before focus mode was entered.")
+
+(defvar-local blame-reveal--focus-saved-header-line-format-p nil
+  "Non-nil when `blame-reveal--focus-saved-header-line-format' is valid.")
+
+(defvar-local blame-reveal--focus-header-line-watch-suppressed nil
+  "Non-nil while focus mode is intentionally updating `header-line-format'.")
+
+(defvar-local blame-reveal--focus-header-line-refresh-timer nil
+  "Pending timer that restores the focus badge after external header updates.")
+
 ;;; Focus Mode State Management
 
 (defun blame-reveal-focus--active-p ()
@@ -109,6 +123,82 @@ Reuses `blame-reveal--find-block-boundaries' from core module."
       blame-reveal-focus-color
     ;; Reuse existing color system
     (blame-reveal--get-commit-color blame-reveal--focused-commit)))
+
+(defun blame-reveal-focus--header-line-prefix ()
+  "Return padding that aligns the focus badge with buffer text.
+This keeps the badge text starting after line numbers instead of at the
+far-left edge of the header line."
+  (let* ((line-number-width (if (bound-and-true-p display-line-numbers-mode)
+                                (line-number-display-width)
+                              0))
+         (margin-width (or left-margin-width 0))
+         (padding (+ line-number-width margin-width 1)))
+    (propertize " " 'display `(space :align-to ,padding))))
+
+(defun blame-reveal-focus--format-badge ()
+  "Build a compact header-line badge for the active focused commit."
+  (when blame-reveal--focused-commit
+    (let* ((commit-hash blame-reveal--focused-commit)
+           (short-hash (substring commit-hash 0 (min 7 (length commit-hash))))
+           (commit-info (gethash commit-hash blame-reveal--commit-info))
+           (summary (or (nth 3 commit-info) "Focused commit"))
+           (block-count (length blame-reveal--focus-block-cache))
+           (line-count (blame-reveal-focus--count-focused-lines))
+           (label (propertize "Focus"
+                              'face 'mode-line-emphasis))
+           (details (propertize
+                     (format ": %s  %s  (%d blocks, %d lines)"
+                             short-hash summary block-count line-count)
+                     'face 'header-line)))
+      (concat (blame-reveal-focus--header-line-prefix)
+              label
+              details))))
+
+(defun blame-reveal-focus--set-header-line-format (value)
+  "Set `header-line-format' to VALUE without reprocessing our own writes."
+  (let ((blame-reveal--focus-header-line-watch-suppressed t))
+    (setq header-line-format value)))
+
+(defun blame-reveal-focus--install-badge ()
+  "Install the persistent focus badge into `header-line-format'."
+  (unless blame-reveal--focus-saved-header-line-format-p
+    (setq blame-reveal--focus-saved-header-line-format header-line-format
+          blame-reveal--focus-saved-header-line-format-p t))
+  (blame-reveal-focus--set-header-line-format
+   (blame-reveal-focus--format-badge)))
+
+(defun blame-reveal-focus--restore-header-line ()
+  "Restore the pre-focus `header-line-format' value."
+  (when blame-reveal--focus-saved-header-line-format-p
+    (blame-reveal-focus--set-header-line-format
+     blame-reveal--focus-saved-header-line-format)
+    (setq blame-reveal--focus-saved-header-line-format nil
+          blame-reveal--focus-saved-header-line-format-p nil)))
+
+(defun blame-reveal-focus--watch-header-line-format (_symbol newval operation where)
+  "Keep the focus badge stable when `header-line-format' changes externally.
+NEWVAL, OPERATION, and WHERE follow `add-variable-watcher'."
+  (when (and (eq operation 'set)
+             (bufferp where)
+             (buffer-live-p where))
+    (with-current-buffer where
+      (when (and blame-reveal--focus-saved-header-line-format-p
+                 blame-reveal--focus-block-cache
+                 (not blame-reveal--focus-header-line-watch-suppressed))
+        (setq blame-reveal--focus-saved-header-line-format newval)
+        (when blame-reveal--focus-header-line-refresh-timer
+          (cancel-timer blame-reveal--focus-header-line-refresh-timer))
+        (setq blame-reveal--focus-header-line-refresh-timer
+              (run-with-timer
+               0 nil
+               (lambda (buffer)
+                 (when (buffer-live-p buffer)
+                   (with-current-buffer buffer
+                     (setq blame-reveal--focus-header-line-refresh-timer nil)
+                     (when (and blame-reveal--focus-saved-header-line-format-p
+                                blame-reveal--focus-block-cache)
+                       (blame-reveal-focus--install-badge)))))
+               where))))))
 
 ;;; Focus Mode Rendering (Reuses existing overlay system)
 
@@ -165,9 +255,11 @@ Reuses `blame-reveal--create-fringe-overlay' from overlay module."
   ;; Render focus overlays
   (blame-reveal-focus--render-visible-region)
 
-  ;; Update header (will be intercepted by advice)
-  (setq blame-reveal--current-block-commit commit-hash)
-  (blame-reveal--update-header)
+  ;; Keep focus context visible even when point moves away.
+  (blame-reveal-focus--install-badge)
+
+  ;; Focus mode owns the top-of-window display and hides regular headers.
+  (blame-reveal--clear-header-state)
 
   ;; Show summary
   (let ((block-count (length blame-reveal--focus-block-cache))
@@ -188,6 +280,13 @@ Reuses `blame-reveal--create-fringe-overlay' from overlay module."
   (setq blame-reveal--focused-commit nil)
   (setq blame-reveal--focus-block-cache nil)
 
+  ;; Restore any previous header-line state.
+  (blame-reveal-focus--restore-header-line)
+
+  (when blame-reveal--focus-header-line-refresh-timer
+    (cancel-timer blame-reveal--focus-header-line-refresh-timer)
+    (setq blame-reveal--focus-header-line-refresh-timer nil))
+
   ;; Clear current fringe overlays
   (blame-reveal--clear-overlays-by-type 'fringe)
 
@@ -197,10 +296,11 @@ Reuses `blame-reveal--create-fringe-overlay' from overlay module."
 
   ;; Re-render normal fringe overlays (reuses existing render function)
   (blame-reveal--render-visible-region)
+  (blame-reveal--update-header)
 
   (message "Focus mode exited"))
 
-;;; Focus Mode Header Integration
+;;; Focus Mode Integration
 
 (defun blame-reveal-focus--find-block-containing-line (line)
   "Find the focus block containing LINE, or nil if not found."
@@ -210,29 +310,6 @@ Reuses `blame-reveal--create-fringe-overlay' from overlay module."
        (and (>= line start)
             (< line (+ start len)))))
    blame-reveal--focus-block-cache))
-
-(defun blame-reveal-focus--get-current-block-for-header ()
-  "Get block info for header display in focus mode.
-Returns (COMMIT-HASH . BLOCK-START) like `blame-reveal--get-current-block'."
-  (when blame-reveal--focused-commit
-    (let ((current-line (line-number-at-pos)))
-      (if-let* ((current-block (blame-reveal-focus--find-block-containing-line current-line)))
-          (cons blame-reveal--focused-commit (nth 0 current-block))
-        ;; Not in any focused block, keep header at previous position
-        (when blame-reveal--header-overlay
-          (cons blame-reveal--focused-commit
-                (line-number-at-pos (overlay-start blame-reveal--header-overlay))))))))
-
-(defun blame-reveal-focus--should-show-sticky-p ()
-  "Check if sticky header should show in focus mode.
-In focus mode, always show sticky header when regular header is not visible."
-  (when (and blame-reveal--focused-commit
-             blame-reveal--focus-block-cache)
-    (let ((current-line (line-number-at-pos))
-          (window-start-line (line-number-at-pos (window-start))))
-      (when-let* ((current-block (blame-reveal-focus--find-block-containing-line current-line))
-                  (block-start (nth 0 current-block)))
-        (> window-start-line block-start)))))
 
 ;;; Block Navigation
 
@@ -257,6 +334,27 @@ Returns block (START-LINE COMMIT-HASH LENGTH) or nil if no more blocks."
 Returns block (START-LINE COMMIT-HASH LENGTH) or nil."
   (when blame-reveal--focus-block-cache
     (blame-reveal-focus--find-block-containing-line (line-number-at-pos))))
+
+(defun blame-reveal-focus--navigate (backward wrap-message)
+  "Move to the next focused block.
+When BACKWARD is non-nil, move to the previous block instead.
+WRAP-MESSAGE is shown when navigation wraps around."
+  (unless (blame-reveal-focus--active-p)
+    (user-error "Focus mode is not active. Use C-c l f to enter focus mode"))
+  (let* ((candidate (blame-reveal-focus--find-next-block backward))
+         (wrap-target (if backward
+                          (car (last blame-reveal--focus-block-cache))
+                        (car blame-reveal--focus-block-cache)))
+         (current-block (blame-reveal-focus--find-current-block)))
+    (cond
+     (candidate
+      (blame-reveal-focus--goto-block candidate))
+     ((and wrap-target
+           (not (equal wrap-target current-block)))
+      (blame-reveal-focus--goto-block wrap-target)
+      (message "%s" wrap-message))
+     (t
+      (message "Only one block in this file")))))
 
 (defun blame-reveal-focus--goto-block (block)
   "Move point to the start of BLOCK and update display."
@@ -300,18 +398,18 @@ When focus mode is active, render only focused commit overlays."
       (blame-reveal-focus--render-visible-region)
     (apply orig-fun args)))
 
-(defun blame-reveal-focus--around-get-current-block (orig-fun &rest args)
-  "Advice around `blame-reveal--get-current-block' for focus mode.
-When focus mode is active, always return focused commit info."
+(defun blame-reveal-focus--around-update-header (orig-fun &rest args)
+  "Advice around `blame-reveal--update-header' for focus mode.
+Suppress regular headers while focus mode is active."
   (if (blame-reveal-focus--active-p)
-      (blame-reveal-focus--get-current-block-for-header)
+      (blame-reveal--clear-header-state)
     (apply orig-fun args)))
 
-(defun blame-reveal-focus--around-should-show-sticky-header-p (orig-fun &rest args)
-  "Advice around `blame-reveal--should-show-sticky-header-p' for focus mode.
-When focus mode is active, use focus-specific logic."
+(defun blame-reveal-focus--around-update-sticky-header (orig-fun &rest args)
+  "Advice around `blame-reveal--update-sticky-header' for focus mode.
+Suppress sticky headers while focus mode is active."
   (if (blame-reveal-focus--active-p)
-      (blame-reveal-focus--should-show-sticky-p)
+      (blame-reveal--clear-header-state)
     (apply orig-fun args)))
 
 ;;; Interactive Commands
@@ -323,7 +421,8 @@ When focus mode is active, use focus-specific logic."
 When entering focus mode:
 - All lines belonging to the current commit are highlighted
 - Fringe indicators only show for the focused commit
-- Header and sticky header always display focused commit info
+- A persistent focus badge stays visible in the header line
+- Regular block and sticky headers are hidden
 - Use `C-c l n` and `C-c l N` to navigate between blocks
 
 When exiting focus mode:
@@ -351,20 +450,7 @@ When exiting focus mode:
 In focus mode, this navigates to the next occurrence of lines
 modified by the locked commit."
   (interactive)
-  (unless (blame-reveal-focus--active-p)
-    (user-error "Focus mode is not active. Use C-c l f to enter focus mode"))
-
-  (let ((next-block (blame-reveal-focus--find-next-block)))
-    (if next-block
-        (blame-reveal-focus--goto-block next-block)
-      ;; Wrap around to first block
-      (let ((first-block (car blame-reveal--focus-block-cache)))
-        (if (and first-block
-                 (not (equal first-block (blame-reveal-focus--find-current-block))))
-            (progn
-              (blame-reveal-focus--goto-block first-block)
-              (message "Wrapped to first block"))
-          (message "Only one block in this file"))))))
+  (blame-reveal-focus--navigate nil "Wrapped to first block"))
 
 ;;;###autoload
 (defun blame-reveal-prev-focus-block ()
@@ -372,33 +458,24 @@ modified by the locked commit."
 In focus mode, this navigates to the previous occurrence of lines
 modified by the locked commit."
   (interactive)
-  (unless (blame-reveal-focus--active-p)
-    (user-error "Focus mode is not active. Use C-c l f to enter focus mode"))
-
-  (let ((prev-block (blame-reveal-focus--find-next-block t)))
-    (if prev-block
-        (blame-reveal-focus--goto-block prev-block)
-      ;; Wrap around to last block
-      (let ((last-block (car (last blame-reveal--focus-block-cache))))
-        (if (and last-block
-                 (not (equal last-block (blame-reveal-focus--find-current-block))))
-            (progn
-              (blame-reveal-focus--goto-block last-block)
-              (message "Wrapped to last block"))
-          (message "Only one block in this file"))))))
+  (blame-reveal-focus--navigate t "Wrapped to last block"))
 
 ;;; Mode Setup/Teardown
 
 (defun blame-reveal-focus--setup ()
   "Setup focus mode integration.
 Called when blame-reveal-mode is enabled."
-  ;; Add advice for integration
-  (advice-add 'blame-reveal--render-visible-region
-              :around #'blame-reveal-focus--around-render-visible-region)
-  (advice-add 'blame-reveal--get-current-block
-              :around #'blame-reveal-focus--around-get-current-block)
-  (advice-add 'blame-reveal--should-show-sticky-header-p
-              :around #'blame-reveal-focus--around-should-show-sticky-header-p))
+  (when (= blame-reveal--focus-integration-refcount 0)
+    (advice-add 'blame-reveal--render-visible-region
+                :around #'blame-reveal-focus--around-render-visible-region)
+    (advice-add 'blame-reveal--update-header
+                :around #'blame-reveal-focus--around-update-header)
+    (advice-add 'blame-reveal--update-sticky-header
+                :around #'blame-reveal-focus--around-update-sticky-header)
+    (add-variable-watcher 'header-line-format
+                          #'blame-reveal-focus--watch-header-line-format))
+  (setq blame-reveal--focus-integration-refcount
+        (1+ blame-reveal--focus-integration-refcount)))
 
 (defun blame-reveal-focus--teardown ()
   "Teardown focus mode integration.
@@ -409,13 +486,21 @@ Called when blame-reveal-mode is disabled."
     (setq blame-reveal--focused-commit nil
           blame-reveal--focus-block-cache nil))
 
-  ;; Remove advice
-  (advice-remove 'blame-reveal--render-visible-region
-                 #'blame-reveal-focus--around-render-visible-region)
-  (advice-remove 'blame-reveal--get-current-block
-                 #'blame-reveal-focus--around-get-current-block)
-  (advice-remove 'blame-reveal--should-show-sticky-header-p
-                 #'blame-reveal-focus--around-should-show-sticky-header-p))
+  (blame-reveal-focus--restore-header-line)
+
+  (when (> blame-reveal--focus-integration-refcount 0)
+    (setq blame-reveal--focus-integration-refcount
+          (1- blame-reveal--focus-integration-refcount)))
+
+  (when (= blame-reveal--focus-integration-refcount 0)
+    (advice-remove 'blame-reveal--render-visible-region
+                   #'blame-reveal-focus--around-render-visible-region)
+    (advice-remove 'blame-reveal--update-header
+                   #'blame-reveal-focus--around-update-header)
+    (advice-remove 'blame-reveal--update-sticky-header
+                   #'blame-reveal-focus--around-update-sticky-header)
+    (remove-variable-watcher 'header-line-format
+                             #'blame-reveal-focus--watch-header-line-format)))
 
 ;;; Hooks Integration
 

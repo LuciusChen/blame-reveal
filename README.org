@@ -42,7 +42,7 @@ When using ='auto= days limit, =blame-reveal-gradient-quality= tunes the balance
 
 *** Recursive Blame & Focus Mode
 
-Navigate line history through parent commits (=b=), or lock onto a single commit to see all its modifications across the file (=F=).
+Navigate line history through parent commits (=C-c l b=), or lock onto a single commit to see all its modifications across the file (=C-c l f=).
 
 ** Installation
 
@@ -90,8 +90,8 @@ Prefix keybindings (=C-c l=):
 
 #+begin_src elisp
 (setq blame-reveal-recent-days-limit 'auto
-      blame-reveal-gradient-quality 'auto
-      blame-reveal-header-style 'block
+      blame-reveal-color-mode 'heatmap
+      blame-reveal-header-style 'inline
       blame-reveal-show-uncommitted-fringe nil)  ; Use with diff-hl
 #+end_src
 
@@ -99,7 +99,7 @@ Prefix keybindings (=C-c l=):
 
 #+begin_src elisp
 ;; Header style
-(setq blame-reveal-header-style 'block)   ; or 'inline, 'margin
+(setq blame-reveal-header-style 'inline)  ; or 'block, 'margin
 
 ;; Fringe side
 (setq blame-reveal-fringe-side 'left-fringe)  ; or 'right-fringe
@@ -108,18 +108,35 @@ Prefix keybindings (=C-c l=):
 (setq blame-reveal-margin-side 'left)  ; or 'right
 #+end_src
 
-*** Color Scheme
+*** Colors
 
 #+begin_src elisp
-;; Default blue
-(setq blame-reveal-color-scheme
-      '(:hue 210
-        :dark-newest 0.70 :dark-oldest 0.35
-        :light-newest 0.45 :light-oldest 0.75
-        :saturation-min 0.25 :saturation-max 0.60))
+;; Recommended: intuitive warm-to-cool aging
+(setq blame-reveal-color-mode 'heatmap)
 
-;; Or use presets via transient menu: blue, green, purple, orange, subtle, vivid
+;; Or keep the classic single-hue gradient
+(setq blame-reveal-color-mode 'gradient)
+
+;; Tuned high-contrast gradient baseline
+(setq blame-reveal-color-scheme
+      '(:hue 200
+        :dark-newest 0.76 :dark-oldest 0.26
+        :light-newest 0.26 :light-oldest 0.82
+        :saturation-min 0.40 :saturation-max 0.76))
+
+;; Fine tuning is still available via `blame-reveal-color-scheme',
+;; but most users should prefer presets from `C-c l m`.
 #+end_src
+
+Visual comparison of the tuned gradient and heatmap modes:
+
+[[./docs/color-compare.svg]]
+
+Typical workflow:
+
+- =C-c l m= → =Color Presets...=: choose =Heatmap=, =Green=, =Subtle=, =Vivid=
+- =C-c l m= → =Recent Window...=: choose =Tight=, =Balanced=, =Wide=, =All=
+- Use Customize only if you really want to tune hue/lightness/saturation manually
 
 *** Performance
 
@@ -154,7 +171,9 @@ Press =C-c l m= in =blame-reveal-mode= to open the configuration menu:
 
 - Toggle settings in real-time
 - Switch header/fringe/margin styles
-- Adjust color scheme with presets or fine-tuning
+- Pick a color preset or heatmap mode
+- Choose a recent-window preset instead of raw day/quality knobs
+- Use advanced tuning only when you need low-level gradient control
 - Enable move/copy detection (=-M -C -C= flags)
 - View auto-calculation diagnostics
 
