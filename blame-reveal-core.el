@@ -8,6 +8,12 @@
 
 (require 'cl-lib)
 
+(defvar blame-reveal-render-margin)
+
+(declare-function blame-reveal--start-loading-animation "blame-reveal-ui")
+(declare-function blame-reveal--stop-loading-animation "blame-reveal-ui")
+(declare-function blame-reveal--clear-header "blame-reveal-ui")
+
 ;;; Constants
 
 ;; State Machine Constants
@@ -80,7 +86,7 @@ Functions are called with no arguments.")
 
 (defvar-local blame-reveal--sticky-header-state nil
   "Cached state of sticky header for optimization.
-A plist with :commit, :visible, and :window-start keys.
+A plist with :commit, :visible, :window-start, and :window-vscroll keys.
 Used to avoid unnecessary sticky header recreation when state hasn't changed.")
 
 (defvar-local blame-reveal--header-current-style nil
@@ -169,11 +175,15 @@ Cache is invalidated when commit count changes significantly.")
 (defvar-local blame-reveal--last-window-start nil
   "Last window start position to detect scrolling.")
 
+(defvar-local blame-reveal--last-window-vscroll nil
+  "Last pixel vertical scroll offset to detect partial-line scrolling.")
+
 (defvar-local blame-reveal--all-commits-loaded nil
   "Flag indicating if all commits info has been loaded.")
 
 (defvar-local blame-reveal--current-line-cache nil
-  "Cache for current line's block info: (line-num commit-hash block-start).")
+  "Cache for current line's block info.
+Format: (line-num commit-hash block-start block-end).")
 
 ;;; State Machine Variables
 
@@ -202,7 +212,8 @@ Cache is invalidated when commit count changes significantly.")
 Each element is a plist with :revision, :line, :blame-data, :commit-info, etc.")
 
 (defvar-local blame-reveal--current-revision nil
-  "Current revision being blamed (nil = HEAD, 'uncommitted = working tree).")
+  "Current revision being blamed.
+Nil means HEAD. `uncommitted' means the working tree.")
 
 (defvar-local blame-reveal--revision-display nil
   "Display string for current revision (for mode line).")
@@ -290,7 +301,7 @@ Returns list of (START-LINE COMMIT-HASH BLOCK-LENGTH)."
 
 (defun blame-reveal--ensure-hash-table (value &optional test)
   "Ensure VALUE is a hash table, creating empty one if needed.
-TEST specifies the hash table test function (default: 'equal)."
+TEST specifies the hash table test function. Default is `equal'."
   (if (hash-table-p value)
       value
     (make-hash-table :test (or test 'equal))))

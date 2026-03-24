@@ -150,7 +150,7 @@ Format functions receive =(commit-hash commit-info color)= and return a =blame-r
 
 ** Transient Menu
 
-Press =m= in blame-reveal-mode to open the configuration menu:
+Press =C-c l m= in =blame-reveal-mode= to open the configuration menu:
 
 - Toggle settings in real-time
 - Switch header/fringe/margin styles
@@ -196,6 +196,17 @@ Use =M-x blame-reveal-show-auto-calculation= to see how the time window is compu
 - Emacs 27.1+
 - Git CLI
 - Optional: Magit, diff-hl, nerd-icons, transient
+
+** Development
+
+- Run tests: =make test=
+- Run byte-compilation: =make compile=
+- Developer docs:
+  - [[file:docs/prd.md][Product requirements]]
+  - [[file:docs/development.md][Development workflow]]
+  - [[file:docs/architecture.md][Architecture]]
+  - [[file:docs/known-limitations.md][Known limitations]]
+  - [[file:postmortem/2026-03-24-input-model-and-lifecycle.md][Input model and lifecycle postmortem]]
 
 ** License
 

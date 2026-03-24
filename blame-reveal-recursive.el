@@ -28,6 +28,8 @@
 (require 'blame-reveal-ui)
 (require 'cl-lib)
 
+(defvar blame-reveal-mode nil)
+
 ;;; Macros
 
 (defmacro blame-reveal--with-git-env (&rest body)
@@ -60,7 +62,7 @@ Sets GIT_PAGER=cat and PAGER=cat for consistent parsing."
 
 (defun blame-reveal--get-base-commit (revision)
   "Extract base commit hash from parent reference REVISION.
-For example, 'abc123^' returns 'abc123'."
+For example, `abc123^' returns `abc123'."
   (when (string-match "^\\([a-f0-9]+\\)\\^+$" revision)
     (match-string 1 revision)))
 
@@ -107,7 +109,8 @@ Returns (PREV-FILE . PREV-COMMIT) or nil."
 
 (defun blame-reveal--save-current-state ()
   "Save current blame state to stack.
-On first recursive blame from HEAD, also saves initial HEAD state at bottom of stack."
+On first recursive blame from HEAD, also save the initial HEAD
+state at the bottom of the stack."
   ;; Special case: First recursive blame from HEAD
   ;; Save a pristine HEAD state at the bottom of the stack for smooth reset
   (when (and (null blame-reveal--blame-stack)
@@ -245,14 +248,14 @@ Restores previous state and provides context-aware error messages."
              (format "File doesn't exist at %s" (substring base-commit 0 8)))
             (if blame-reveal--detect-moves
                 (message "File doesn't exist at commit %s" (substring base-commit 0 8))
-              (message "File doesn't exist at commit %s. Tip: Press [M] to enable move/copy detection"
+              (message "File doesn't exist at commit %s. Tip: use C-c l m, then M, to enable move/copy detection"
                        (substring base-commit 0 8))))
            ;; Case 3: Other errors
            (t
             (blame-reveal--state-error (format "No blame data at %s" revision))
             (if blame-reveal--detect-moves
                 (message "No blame data at revision %s" revision)
-              (message "No blame data at revision %s. Tip: Press [M] to enable move/copy detection"
+              (message "No blame data at revision %s. Tip: use C-c l m, then M, to enable move/copy detection"
                        revision))))
         ;; Ensure state is reset in all cases
         (run-with-timer 0.2 nil
@@ -293,7 +296,7 @@ Returns non-nil on success, nil if user cancels."
         (message "Staying at current location")
         nil)))))
 
-(defun blame-reveal--view-file-at-revision (relative-file commit git-root)
+(defun blame-reveal--view-file-at-revision (relative-file commit _git-root)
   "View the historical content of RELATIVE-FILE at COMMIT in a new buffer.
 
 This function handles the crucial step of setting the Major Mode for
@@ -403,7 +406,7 @@ Returns the new buffer on success, nil on failure."
 (defun blame-reveal--get-blame-data-sync (revision file &optional range)
   "Get git blame data for FILE at REVISION synchronously.
 If RANGE is (START-LINE . END-LINE), only blame that range.
-REVISION can be commit hash or 'uncommitted for working tree.
+REVISION can be a commit hash or `uncommitted' for the working tree.
 Returns (BLAME-DATA . MOVE-METADATA)."
   (let ((git-root (vc-git-root file)))
     (when git-root
@@ -498,10 +501,10 @@ Always loads complete file for proper recursive blame navigation."
 (defun blame-reveal--analyze-recursive-target (commit-hash)
   "Analyze where to navigate from COMMIT-HASH.
 Returns a plist with:
-  :action - Symbol: 'stop, 'follow-file, or 'blame-parent
+  :action - Symbol: `stop', `follow-file', or `blame-parent'
   :message - String to display to user
-  :target-file - File to follow (for 'follow-file action)
-  :target-commit - Commit to blame (for 'follow-file or 'blame-parent)"
+  :target-file - File to follow (for `follow-file')
+  :target-commit - Commit to blame (for `follow-file' or `blame-parent')"
   (let* ((root (vc-git-root (buffer-file-name)))
          (current-file (file-relative-name (buffer-file-name) root))
          (prev-loc (blame-reveal--get-previous-location commit-hash))
@@ -560,7 +563,7 @@ Returns non-nil if action was executed, nil if stopped/cancelled."
        (if blame-reveal--detect-moves
            (message "%s" message-text)
          ;; Add tip about M/C detection when not enabled
-         (message "%s. Tip: Try enabling move/copy detection [M] to trace file origin"
+         (message "%s. Tip: Try C-c l m, then M, to enable move/copy detection and trace file origin"
                   message-text))
        nil)
 

@@ -39,6 +39,8 @@
 (require 'blame-reveal-color)
 (require 'blame-reveal-header)
 
+(defvar blame-reveal-mode nil)
+
 ;;; Customization
 
 (defgroup blame-reveal-focus nil
@@ -59,7 +61,8 @@ If nil, use the commit's normal color (from the gradient)."
   :group 'blame-reveal-focus)
 
 (defcustom blame-reveal-focus-color "#6699ff"
-  "Color used for focused commit fringe when `blame-reveal-focus-use-special-color' is t."
+  "Color for the focused commit fringe when
+`blame-reveal-focus-use-special-color' is non-nil."
   :type 'color
   :group 'blame-reveal-focus)
 
@@ -72,8 +75,8 @@ are highlighted in the fringe.")
 
 (defvar-local blame-reveal--focus-block-cache nil
   "Cached list of blocks belonging to the focused commit.
-Each element is (START-LINE COMMIT-HASH LENGTH) from `blame-reveal--find-block-boundaries'.
-Invalidated when focused commit changes.")
+Each element is `(START-LINE COMMIT-HASH LENGTH)' from
+`blame-reveal--find-block-boundaries'. Invalidated when focus changes.")
 
 ;;; Focus Mode State Management
 
@@ -170,7 +173,7 @@ Reuses `blame-reveal--create-fringe-overlay' from overlay module."
   (let ((block-count (length blame-reveal--focus-block-cache))
         (line-count (blame-reveal-focus--count-focused-lines))
         (commit-info (gethash commit-hash blame-reveal--commit-info)))
-    (message "Focus mode: %s (%d blocks, %d lines) - Press 'F' to exit, 'n/N' to navigate"
+    (message "Focus mode: %s (%d blocks, %d lines) - Use C-c l f to exit, C-c l n/C-c l N to navigate"
              (if commit-info
                  (format "%s - %s"
                          (substring commit-hash 0 7)
@@ -190,8 +193,7 @@ Reuses `blame-reveal--create-fringe-overlay' from overlay module."
 
   ;; Reset header tracking to force refresh
   (setq blame-reveal--current-block-commit nil
-        blame-reveal--last-rendered-commit nil
-        blame-reveal--last-rendered-block-start nil)
+        blame-reveal--last-rendered-commit nil)
 
   ;; Re-render normal fringe overlays (reuses existing render function)
   (blame-reveal--render-visible-region)
@@ -322,7 +324,7 @@ When entering focus mode:
 - All lines belonging to the current commit are highlighted
 - Fringe indicators only show for the focused commit
 - Header and sticky header always display focused commit info
-- Use 'n' and 'N' to navigate between blocks
+- Use `C-c l n` and `C-c l N` to navigate between blocks
 
 When exiting focus mode:
 - Normal blame display is restored"
@@ -350,7 +352,7 @@ In focus mode, this navigates to the next occurrence of lines
 modified by the locked commit."
   (interactive)
   (unless (blame-reveal-focus--active-p)
-    (user-error "Focus mode is not active. Press 'F' to enter focus mode."))
+    (user-error "Focus mode is not active. Use C-c l f to enter focus mode"))
 
   (let ((next-block (blame-reveal-focus--find-next-block)))
     (if next-block
@@ -371,7 +373,7 @@ In focus mode, this navigates to the previous occurrence of lines
 modified by the locked commit."
   (interactive)
   (unless (blame-reveal-focus--active-p)
-    (user-error "Focus mode is not active. Press 'F' to enter focus mode."))
+    (user-error "Focus mode is not active. Use C-c l f to enter focus mode"))
 
   (let ((prev-block (blame-reveal-focus--find-next-block t)))
     (if prev-block
@@ -414,14 +416,6 @@ Called when blame-reveal-mode is disabled."
                  #'blame-reveal-focus--around-get-current-block)
   (advice-remove 'blame-reveal--should-show-sticky-header-p
                  #'blame-reveal-focus--around-should-show-sticky-header-p))
-
-;;; Keymap Extensions
-
-;; Add focus mode commands to main keymap
-(with-eval-after-load 'blame-reveal
-  (define-key blame-reveal-mode-map (kbd "F") #'blame-reveal-focus-commit)
-  (define-key blame-reveal-mode-map (kbd "n") #'blame-reveal-next-focus-block)
-  (define-key blame-reveal-mode-map (kbd "N") #'blame-reveal-prev-focus-block))
 
 ;;; Hooks Integration
 

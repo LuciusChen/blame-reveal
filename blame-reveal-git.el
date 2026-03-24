@@ -9,6 +9,9 @@
 (require 'vc-git)
 (require 'blame-reveal-core)
 
+(defvar blame-reveal-lazy-load-threshold)
+(defvar blame-reveal-async-blame)
+
 ;;; Git Command Building
 
 (defun blame-reveal--build-blame-command-args (start-line end-line relative-file &optional revision)
@@ -129,12 +132,11 @@ Returns (BLAME-DATA . MOVE-METADATA) where:
 - BLAME-DATA is list of (LINE-NUMBER . COMMIT-HASH)
 - MOVE-METADATA is hash table of commit -> previous info
 
-IMPORTANT: The 'filename' field in git blame output indicates the filename
+IMPORTANT: The `filename' field in git blame output indicates the filename
 at the time the line was last modified, NOT a cross-file operation.
-Only the 'previous' field reliably indicates cross-file move/copy."
+Only the `previous' field reliably indicates cross-file move/copy."
   (let* ((blame-data nil)
          (current-commit nil)
-         (current-line-filename nil)
          (move-metadata (make-hash-table :test 'equal))
          (git-root (or (and (buffer-file-name)
                             (vc-git-root (buffer-file-name)))
@@ -146,7 +148,6 @@ Only the 'previous' field reliably indicates cross-file move/copy."
          ;; Commit hash line
          ((looking-at "^\\([a-f0-9]\\{40\\}\\) \\([0-9]+\\) \\([0-9]+\\)")
           (setq current-commit (match-string 1))
-          (setq current-line-filename nil)
           (let ((line-number (string-to-number (match-string 3))))
             (push (cons line-number current-commit) blame-data))
           (forward-line 1))
@@ -156,7 +157,6 @@ Only the 'previous' field reliably indicates cross-file move/copy."
          ;; It may differ from current-file due to renames in the file's history.
          ;; DO NOT use this to detect cross-file operations!
          ((looking-at "^filename \\(.+\\)$")
-          (setq current-line-filename (match-string 1))
           ;; Store filename for informational purposes only
           ;; Could be used for display/debugging, but not for logic decisions
           (forward-line 1))

@@ -181,7 +181,7 @@ Now uses unified flicker-free system - no special handling needed."
 
 ;;; Auto-refresh after header-style change
 
-(cl-defmethod transient-infix-set :after ((obj blame-reveal-lisp-variable) value)
+(cl-defmethod transient-infix-set :after ((obj blame-reveal-lisp-variable) _value)
   "Refresh display and transient menu after setting certain variables."
   (let ((var (oref obj variable)))
     (cond

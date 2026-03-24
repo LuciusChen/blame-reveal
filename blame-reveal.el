@@ -37,6 +37,7 @@
 
 ;;; Code:
 
+(require 'ansi-color)
 (require 'vc-git)
 (require 'cl-lib)
 
@@ -46,6 +47,21 @@
 (require 'blame-reveal-color)
 (require 'blame-reveal-header)
 (require 'blame-reveal-ui)
+
+(defvar blame-reveal-mode nil)
+(defvar blame-reveal-global-mode nil)
+
+(declare-function blame-reveal-menu "blame-reveal-transient")
+(declare-function blame-reveal-blame-recursively "blame-reveal-recursive")
+(declare-function blame-reveal-blame-back "blame-reveal-recursive")
+(declare-function blame-reveal-blame-at-revision "blame-reveal-recursive")
+(declare-function blame-reveal-reset-to-head "blame-reveal-recursive")
+(declare-function blame-reveal-focus-commit "blame-reveal-focus")
+(declare-function blame-reveal-next-focus-block "blame-reveal-focus")
+(declare-function blame-reveal-prev-focus-block "blame-reveal-focus")
+(declare-function magit-show-commit "ext:magit-show" (revision &optional args files))
+(declare-function magit-get-mode-buffer "ext:magit-mode" (mode &optional value frame))
+(declare-function magit-log-buffer-file "ext:magit-log" (&optional follow))
 
 ;;; Fringe Bitmap Definitions
 
@@ -98,9 +114,6 @@
     map)
   "Keymap for `blame-reveal-mode'.
 Commands are available under the `C-c l` prefix.")
-
-(defvar blame-reveal--emulation-alist nil
-  "Emulation mode map alist for blame-reveal.")
 
 ;;; Timer Variables
 
@@ -291,15 +304,15 @@ while the fringe shows visual age indicators."
          (when (and (boundp 'blame-reveal-mode) blame-reveal-mode)
            (dolist (buffer (buffer-list))
              (with-current-buffer buffer
-               (when blame-reveal-mode
-                 ;; Restore margins when switching away from margin style
-                 (when (and (not (eq value 'margin))
-                            (blame-reveal--is-margin-mode-p))
-                   (blame-reveal--restore-window-margins))
-                 ;; Setup margins when switching to margin style
-                 (when (and (eq value 'margin)
-                            (not (blame-reveal--is-margin-mode-p)))
-                   (blame-reveal--ensure-window-margins))
+                 (when blame-reveal-mode
+                   ;; Restore margins when switching away from margin style
+                   (when (and (not (eq value 'margin))
+                              (blame-reveal--is-margin-style-p))
+                     (blame-reveal--restore-window-margins))
+                   ;; Setup margins when switching to margin style
+                   (when (and (eq value 'margin)
+                              (not (blame-reveal--is-margin-style-p)))
+                     (blame-reveal--ensure-window-margins))
                  ;; Refresh display using No-Flicker system
                  (blame-reveal--clear-header)
                  (setq blame-reveal--last-rendered-commit nil)
@@ -347,7 +360,7 @@ Using days (instead of commit count) ensures consistent behavior
 across projects with different commit frequencies.
 
 Values:
-  'auto  - Automatically calculate based on commit density and
+  `auto' - Automatically calculate based on commit density and
            gradient quality. Adapts to both normal and recursive
            blame modes. (Recommended)
 
@@ -359,7 +372,7 @@ Values:
            (like IntelliJ IDEA)
 
 Examples:
-  'auto - Smart calculation, good for most cases
+  `auto' - Smart calculation, good for most cases
   30    - Last month (for very active files)
   90    - Last quarter
   180   - Last half year
@@ -380,22 +393,22 @@ regardless of commit frequency."
 (defcustom blame-reveal-gradient-quality 'auto
   "Control trade-off between time coverage and color distinction.
 
-This setting affects how 'auto mode calculates the days limit.
+This setting affects how `auto' mode calculates the days limit.
 It controls the target number of commits and minimum color difference.
 
-'strict  - Fewer commits (5-10), excellent distinction (3-5% color steps)
+`strict'  - Fewer commits (5-10), excellent distinction (3-5% color steps)
            Best for visual clarity, shorter time window.
            Recommended for files with many commits.
 
-'auto    - Balanced (10-20 commits), good distinction (2-3% color steps)
+`auto'    - Balanced (10-20 commits), good distinction (2-3% color steps)
            Good balance between clarity and historical context.
            Recommended for most cases.
 
-'relaxed - More commits (15-30), acceptable distinction (1.5-2% color steps)
+`relaxed' - More commits (15-30), acceptable distinction (1.5-2% color steps)
            More historical context, colors may be subtle.
            Recommended for files with few commits.
 
-Only used when `blame-reveal-recent-days-limit' is 'auto.
+Only used when `blame-reveal-recent-days-limit' is `auto'.
 For fixed days limit, this setting is ignored.
 
 Color distinction is measured by the lightness/saturation step between
@@ -467,7 +480,8 @@ Can be:
 
 (defcustom blame-reveal-old-commit-color nil
   "Color for old commits (not in top N or beyond time limit).
-If nil, uses automatic gray color based on theme (dark theme: #4a4a4a, light theme: #d0d0d0).
+If nil, use an automatic gray based on theme.
+Dark theme uses #4a4a4a. Light theme uses #d0d0d0.
 Set to a color string like \"#888888\" to use a fixed color."
   :type '(choice (const :tag "Auto (theme-based gray)" nil)
                  (color :tag "Fixed color"))
@@ -490,25 +504,25 @@ Light theme: newest commits are darker (lower lightness) to stand out
 Example schemes:
 
   High contrast:
-  '(:hue 210
+  `(:hue 210
     :dark-newest 0.75 :dark-oldest 0.30
     :light-newest 0.35 :light-oldest 0.85
     :saturation-min 0.35 :saturation-max 0.70)
 
   Green:
-  '(:hue 120
+  `(:hue 120
     :dark-newest 0.70 :dark-oldest 0.35
     :light-newest 0.40 :light-oldest 0.75
     :saturation-min 0.25 :saturation-max 0.60)
 
   Purple:
-  '(:hue 280
+  `(:hue 280
     :dark-newest 0.70 :dark-oldest 0.35
     :light-newest 0.45 :light-oldest 0.75
     :saturation-min 0.25 :saturation-max 0.60)
 
   Subtle:
-  '(:hue 210
+  `(:hue 210
     :dark-newest 0.60 :dark-oldest 0.40
     :light-newest 0.55 :light-oldest 0.70
     :saturation-min 0.20 :saturation-max 0.45)"
@@ -556,7 +570,8 @@ When enabled, git blame commands run in background processes,
 keeping Emacs responsive during loading and scrolling.
 
 Values:
-  'auto - Use async for large files (> `blame-reveal-lazy-load-threshold' lines),
+  `auto' - Use async for large files
+           (> `blame-reveal-lazy-load-threshold' lines),
           sync for small files (recommended)
   t     - Always use async loading
   nil   - Always use synchronous loading (may block UI for large files)
@@ -572,7 +587,7 @@ For small files, sync loading is actually faster due to less overhead."
 
 (defcustom blame-reveal-use-magit 'auto
   "Whether to use magit for showing commit details.
-- 'auto: Use magit if available, otherwise use built-in
+- `auto': Use magit if available, otherwise use built-in
 - t: Always use magit (error if not available)
 - nil: Always use built-in git commands"
   :type '(choice (const :tag "Auto (use magit if available)" auto)
@@ -658,6 +673,33 @@ Returns t if valid, otherwise prints message and returns nil."
       (message "Blame-reveal: File is not tracked by git")
       nil)
      (t t))))
+
+(defun blame-reveal--eligible-buffer-p (&optional buffer)
+  "Return non-nil when BUFFER is a git-tracked file buffer for this mode."
+  (with-current-buffer (or buffer (current-buffer))
+    (when-let* ((file (buffer-file-name)))
+      (and (not (minibufferp))
+           (not (string-prefix-p " " (buffer-name)))
+           (not (string-prefix-p "*" (buffer-name)))
+           (vc-git-registered file)))))
+
+(defun blame-reveal--active-in-other-buffer-p ()
+  "Return non-nil when `blame-reveal-mode' is active in another buffer."
+  (cl-some (lambda (buf)
+             (with-current-buffer buf
+               (and (not (eq buf (current-buffer)))
+                    blame-reveal-mode)))
+           (buffer-list)))
+
+(defun blame-reveal--install-global-integrations ()
+  "Install global hooks and advice shared across all blame-reveal buffers."
+  (blame-reveal--setup-theme-advice)
+  (advice-add 'transient-setup :around #'blame-reveal--protect-during-transient-setup))
+
+(defun blame-reveal--remove-global-integrations ()
+  "Remove global hooks and advice shared across all blame-reveal buffers."
+  (blame-reveal--remove-theme-advice)
+  (advice-remove 'transient-setup #'blame-reveal--protect-during-transient-setup))
 
 (defun blame-reveal--protect-during-transient-setup (orig-fun &rest args)
   "Prevent header deletion during transient-setup.
@@ -999,36 +1041,14 @@ The cache will be automatically rebuilt on next update."
     (blame-reveal--render-visible-region)
     (message "Auto-calculation cache cleared and recalculated")))
 
-(defun blame-reveal--auto-enable ()
-  "Automatically enable blame-reveal-mode if current buffer is appropriate.
-This function is called by `blame-reveal-global-mode' via `find-file-hook'.
-It checks if the buffer is a git-tracked file and enables blame-reveal-mode.
-Uses idle timer to avoid blocking file opening."
-  (when (and blame-reveal-global-mode
-             (buffer-file-name)
-             (not (minibufferp))
-             (not (string-prefix-p " " (buffer-name)))  ; Exclude temporary buffers
-             (not (string-prefix-p "*" (buffer-name)))) ; Exclude special buffers
-    ;; Delay git status check to avoid blocking file opening
-    (run-with-idle-timer
-     0.1 nil
-     (lambda (buf)
-       (when (and (buffer-live-p buf)
-                  (eq buf (current-buffer)))
-         (with-current-buffer buf
-           (when (and (buffer-file-name)
-                      (vc-git-registered (buffer-file-name))
-                      (not blame-reveal-mode))
-             (blame-reveal-mode 1)))))
-     (current-buffer))))
+(defun blame-reveal--turn-on-mode ()
+  "Enable `blame-reveal-mode' in the current buffer when appropriate."
+  (when (blame-reveal--eligible-buffer-p)
+    (blame-reveal-mode 1)))
 
 
 (defun blame-reveal--setup-buffer-resources ()
   "Initialize all resources, hooks, and state for the current buffer."
-  ;; Keymap & Emulation
-  (setq blame-reveal--emulation-alist
-        `((blame-reveal-mode . ,blame-reveal-mode-map)))
-  (add-to-list 'emulation-mode-map-alists 'blame-reveal--emulation-alist)
   ;; Subsystems Init
   (blame-reveal--init-overlay-registry)
   (blame-reveal--init-color-strategy)
@@ -1040,7 +1060,10 @@ Uses idle timer to avoid blocking file opening."
   (blame-reveal--ensure-move-copy-metadata)
   ;; UI Setup
   (blame-reveal--setup-mode-line)
-  (blame-reveal--setup-theme-advice)
+  (unless (blame-reveal--active-in-other-buffer-p)
+    (blame-reveal--install-global-integrations))
+  (setq blame-reveal--last-window-start (window-start)
+        blame-reveal--last-window-vscroll (window-vscroll nil t))
   ;; Text-scale support
   (add-hook 'text-scale-mode-hook #'blame-reveal--on-text-scale-change nil t)
   (blame-reveal--update-fringe-bitmap)
@@ -1049,8 +1072,6 @@ Uses idle timer to avoid blocking file opening."
   (add-hook 'window-scroll-functions #'blame-reveal--scroll-handler nil t)
   (add-hook 'post-command-hook #'blame-reveal--update-header nil t)
   (add-hook 'window-configuration-change-hook #'blame-reveal--render-visible-region nil t)
-  ;; Transient Protection: prevent header deletion during transient-setup
-  (advice-add 'transient-setup :around #'blame-reveal--protect-during-transient-setup)
   ;; Trigger Loading
   (blame-reveal--load-blame-data))
 
@@ -1087,17 +1108,21 @@ Handles Hooks, Timers, Overlays, and State."
         ;; Critical: reset header throttling state
         blame-reveal--last-rendered-commit nil
         blame-reveal--last-update-line nil
+        blame-reveal--last-window-start nil
+        blame-reveal--last-window-vscroll nil
         blame-reveal--current-block-commit nil)
-  ;; Advice Cleanup
-  (blame-reveal--remove-theme-advice)
-  (advice-remove 'transient-setup #'blame-reveal--protect-during-transient-setup)
-  (remove-hook 'text-scale-mode-hook #'blame-reveal--on-text-scale-change t))
+  ;; Buffer-local cleanup
+  (remove-hook 'text-scale-mode-hook #'blame-reveal--on-text-scale-change t)
+  ;; Global cleanup
+  (unless (blame-reveal--active-in-other-buffer-p)
+    (blame-reveal--remove-global-integrations)))
 
 ;;;###autoload
 (define-minor-mode blame-reveal-mode
   "Toggle git blame fringe display."
   :lighter " BlameReveal"
   :group 'blame-reveal
+  :keymap blame-reveal-mode-map
   (if blame-reveal-mode
       ;; --- Enable Phase ---
       (if (blame-reveal--can-enable-mode-p)
@@ -1112,11 +1137,7 @@ Handles Hooks, Timers, Overlays, and State."
     (blame-reveal--cleanup-buffer-resources)
 
     ;; Global cleanup (if no other buffers are using the mode)
-    (unless (cl-some (lambda (buf)
-                       (with-current-buffer buf
-                         (and (not (eq buf (current-buffer)))
-                              blame-reveal-mode)))
-                     (buffer-list))
+    (unless (blame-reveal--active-in-other-buffer-p)
       (blame-reveal--cleanup-mode-line))
 
     (run-hooks 'blame-reveal-mode-off-hook)))
@@ -1124,7 +1145,9 @@ Handles Hooks, Timers, Overlays, and State."
 ;;; Global Mode
 
 ;;;###autoload
-(define-minor-mode blame-reveal-global-mode
+(define-globalized-minor-mode blame-reveal-global-mode
+  blame-reveal-mode
+  blame-reveal--turn-on-mode
   "Toggle automatic blame-reveal for all git-tracked files.
 
 When enabled, blame-reveal-mode will be automatically activated
@@ -1133,18 +1156,7 @@ on a project and you want blame information always available.
 
 When disabled, you need to manually enable blame-reveal-mode for
 each file."
-  :global t
-  :group 'blame-reveal
-  (if blame-reveal-global-mode
-      (progn
-        (add-hook 'find-file-hook #'blame-reveal--auto-enable)
-        ;; Enable for already opened buffers
-        (dolist (buf (buffer-list))
-          (with-current-buffer buf
-            (blame-reveal--auto-enable)))
-        (message "Blame-reveal global mode enabled"))
-    (remove-hook 'find-file-hook #'blame-reveal--auto-enable)
-    (message "Blame-reveal global mode disabled")))
+  :group 'blame-reveal)
 
 (provide 'blame-reveal)
 ;;; blame-reveal.el ends here

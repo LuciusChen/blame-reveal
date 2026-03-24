@@ -13,6 +13,13 @@
 (require 'blame-reveal-color)
 (require 'cl-lib)
 
+(defvar blame-reveal-header-style)
+(defvar blame-reveal-margin-side)
+(defvar blame-reveal-uncommitted-label)
+(defvar blame-reveal-block-format-function)
+(defvar blame-reveal-fringe-side)
+(defvar blame-reveal-show-uncommitted-fringe)
+
 ;;; Time Formatting Constants
 
 (defconst blame-reveal--time-formats
@@ -88,7 +95,7 @@ Logs a warning message if compression occurs.
 
 Arguments:
   DISPLAY - A `blame-reveal-commit-display' struct
-  STYLE   - Symbol, either 'inline or 'margin
+  STYLE   - Symbol, either `inline' or `margin'
 
 Returns:
   Modified `blame-reveal-commit-display' struct with single line."
@@ -134,8 +141,7 @@ Returns the configured side when in margin mode, nil otherwise."
       ;; Calculate width based on actual formatted output
       (maphash (lambda (hash info)
                  (when info
-                   (let* ((color (blame-reveal--get-commit-color hash))
-                          ;; Get actual formatted display using custom function
+                   (let* (;; Get actual formatted display using custom function
                           (display (blame-reveal--get-formatted-display hash 'margin))
                           (formatted-text (car (blame-reveal-commit-display-lines display)))
                           (actual-width (length formatted-text)))
@@ -197,7 +203,8 @@ Saves original margin widths and applies calculated width to configured side."
 
 (defun blame-reveal--icon (name &optional color fallback)
   "Return icon for NAME using nerd-icons backends.
-NAME like 'nf-PREFIX-ICONNAME'. COLOR sets :foreground; FALLBACK if unavailable."
+NAME should look like `nf-PREFIX-ICONNAME'.
+COLOR sets `:foreground'. FALLBACK is used if no icon backend is available."
   (let* ((face (when color `(:foreground ,color)))
          (backend (and (string-match "^nf-\\([^-]+\\)-" name)
                        (cdr (assoc (match-string 1 name)
@@ -403,20 +410,8 @@ up to the two largest time units, assuming Git-like relative time format."
 
 (defun blame-reveal--get-formatted-display (commit-hash style)
   "Get formatted display for COMMIT-HASH in STYLE.
-
-Arguments:
-  COMMIT-HASH - Commit hash string
-  STYLE       - Symbol: 'block, 'inline, or 'margin
-
-Returns:
-  A `blame-reveal-commit-display' struct formatted for the requested style.
-
-Processing flow:
-  - Block:  Uses user's block format function
-  - Inline: Uses custom inline function if set, otherwise uses default
-  - Margin: Uses custom margin function if set, otherwise uses default compact format
-
-For inline and margin styles, ensures the result is single-line."
+Return a `blame-reveal-commit-display' for `block', `inline',
+or `margin' STYLE. Inline and margin displays are forced to one line."
 (let* ((info (gethash commit-hash blame-reveal--commit-info))
          (color (blame-reveal--get-commit-color commit-hash))
          (display
@@ -447,7 +442,7 @@ For inline and margin styles, ensures the result is single-line."
 (defun blame-reveal--format-block-string (lines faces fringe-face show-fringe
                                                 need-leading-newline &optional sticky-indicator)
   "Format header content string.
-If STICKY-INDICATOR is provided, it should be a propertized string with face already applied."
+STICKY-INDICATOR, when non-nil, should already be propertized."
   (let ((result (if need-leading-newline "\n" ""))
         (line-count (length lines)))
     (dotimes (i line-count)
@@ -488,15 +483,28 @@ If STICKY-INDICATOR is provided, it should be a propertized string with face alr
        existing-overlay line-number commit-hash color (not show-fringe)
        sticky-indicator))))
 
-(defun blame-reveal--sticky-header-needs-update-p (commit-hash should-show window-start)
-  "Check if sticky header needs update for COMMIT-HASH, SHOULD-SHOW, WINDOW-START."
+(defun blame-reveal--normalize-window-vscroll-for-sticky-header ()
+  "Snap away partial pixel scroll before showing sticky header.
+Returns the effective window vscroll after normalization."
+  (let ((window-vscroll (window-vscroll nil t)))
+    (when (> window-vscroll 0)
+      (set-window-vscroll nil 0 t)
+      (setq window-vscroll 0))
+    window-vscroll))
+
+(defun blame-reveal--sticky-header-needs-update-p (commit-hash should-show window-start window-vscroll)
+  "Check if sticky header needs update for COMMIT-HASH.
+SHOULD-SHOW controls visibility.  WINDOW-START and WINDOW-VSCROLL track
+line-based and pixel-based scrolling state."
   (let ((cached-commit (plist-get blame-reveal--sticky-header-state :commit))
         (cached-visible (plist-get blame-reveal--sticky-header-state :visible))
-        (cached-window-start (plist-get blame-reveal--sticky-header-state :window-start)))
+        (cached-window-start (plist-get blame-reveal--sticky-header-state :window-start))
+        (cached-window-vscroll (plist-get blame-reveal--sticky-header-state :window-vscroll)))
     (or (not (equal cached-commit commit-hash))
         (not (eq cached-visible should-show))
         (and should-show
-             (not (equal cached-window-start window-start))))))
+             (or (not (equal cached-window-start window-start))
+                 (not (equal cached-window-vscroll window-vscroll)))))))
 
 (defun blame-reveal--update-sticky-header ()
   "Update sticky header using in-place update for smooth transitions."
@@ -505,8 +513,12 @@ If STICKY-INDICATOR is provided, it should be a propertized string with face alr
                  (current-line (line-number-at-pos))
                  (should-show (blame-reveal--should-show-sticky-header-p
                                commit-hash block-start-line current-line))
-                 (window-start (window-start)))
-      (when (blame-reveal--sticky-header-needs-update-p commit-hash should-show window-start)
+                 (window-start (window-start))
+                 (window-vscroll (if should-show
+                                     (blame-reveal--normalize-window-vscroll-for-sticky-header)
+                                   (window-vscroll nil t))))
+      (when (blame-reveal--sticky-header-needs-update-p
+             commit-hash should-show window-start window-vscroll)
         (if should-show
             (let ((new-sticky (blame-reveal--ensure-sticky-header
                                blame-reveal--sticky-header-overlay commit-hash)))
@@ -516,7 +528,8 @@ If STICKY-INDICATOR is provided, it should be a propertized string with face alr
         (setq blame-reveal--sticky-header-state
               (list :commit commit-hash
                     :visible should-show
-                    :window-start window-start))))))
+                    :window-start window-start
+                    :window-vscroll window-vscroll))))))
 
 (defun blame-reveal--build-header (context)
   "Build header overlay from CONTEXT."
@@ -608,8 +621,9 @@ If STICKY-INDICATOR is provided, it should be a propertized string with face alr
            (blame-reveal--get-effective-header-style))))
 
 (defun blame-reveal--render-style-data (commit-hash style color no-fringe &optional sticky-indicator)
-  "Calculate overlay properties (string-type, position-fn, content) for STYLE.
-Returns a plist containing :string-type, :content, :position-fn, and :end-pos-fn."
+  "Calculate overlay properties for STYLE.
+Return a plist with `:string-type', `:content', `:position-fn',
+and `:end-pos-fn'."
   (let* ((display (blame-reveal--get-formatted-display commit-hash style))
          (fringe-face (blame-reveal--ensure-fringe-face color))
          (show-fringe (not no-fringe)))
@@ -631,10 +645,10 @@ Returns a plist containing :string-type, :content, :position-fn, and :end-pos-fn
                                (propertize main-line 'face main-face)
                                (when show-fringe
                                  (propertize "\n!" 'display (list blame-reveal-fringe-side 'blame-reveal-full fringe-face))))))
-         (list :string-type 'after-string
-               :content content
-               :position-fn (lambda (line) (line-end-position))
-               :end-pos-fn (lambda (pos) pos))))
+               (list :string-type 'after-string
+                     :content content
+                     :position-fn (lambda (_line) (line-end-position))
+                     :end-pos-fn (lambda (pos) pos))))
 
       ('margin
        (let* ((margin-text (car (blame-reveal-commit-display-lines display)))
@@ -643,10 +657,10 @@ Returns a plist containing :string-type, :content, :position-fn, and :end-pos-fn
               (display-prop `((margin ,(intern (format "%s-margin" side)))
                               ,(propertize (concat (or sticky-indicator "") margin-text)
                                            'face margin-face))))
-         (list :string-type 'line-prefix
-               :content (propertize " " 'display display-prop)
-               :position-fn (lambda (line) (line-beginning-position))
-               :end-pos-fn (lambda (bol) (1+ bol))))))))
+               (list :string-type 'line-prefix
+                     :content (propertize " " 'display display-prop)
+                     :position-fn (lambda (_line) (line-beginning-position))
+                     :end-pos-fn (lambda (bol) (1+ bol))))))))
 
 (defun blame-reveal--update-overlay-in-place (overlay start-pos end-pos string-type content)
   "Update OVERLAY in place at START-POS to END-POS with STRING-TYPE and CONTENT."

@@ -10,6 +10,18 @@
 (require 'blame-reveal-git)
 (require 'blame-reveal-color)
 
+(defvar blame-reveal-mode nil)
+(defvar blame-reveal-fringe-side)
+(defvar blame-reveal-color-scheme)
+(defvar blame-reveal-loading-animation-frames-per-step)
+(defvar blame-reveal--global-loading-animation-timer)
+(defvar blame-reveal-loading-animation-speed)
+(defvar blame-reveal-show-uncommitted-fringe)
+(defvar blame-reveal--scroll-render-delay)
+(defvar blame-reveal-temp-overlay-delay)
+(defvar blame-reveal--scroll-timer)
+(defvar blame-reveal--theme-change-timer)
+
 ;;; Transient Protection
 ;; Prevents header interference during transient menu operations.
 ;; This ensures a smooth UI experience when using transient commands.
@@ -20,7 +32,8 @@ Set to t when transient-setup begins, cleared after it completes.")
 
 (defvar-local blame-reveal--pending-delete-overlays nil
   "List of overlays pending deletion.
-These overlays will be deleted after the next redisplay cycle to prevent flicker.")
+These overlays are deleted after the next redisplay cycle to prevent
+flicker.")
 
 ;;; Registry Initialization
 
@@ -57,8 +70,8 @@ Returns the overlay."
 (defun blame-reveal--unregister-overlay (overlay)
   "Unregister OVERLAY from all indices and delete it.
 Safe to call even if overlay is already deleted or invalid.
-Note: This performs immediate deletion, use `blame-reveal--schedule-overlay-deletion'
-for flicker-free updates."
+This performs immediate deletion. Use
+`blame-reveal--schedule-overlay-deletion' for flicker-free updates."
   (when (and overlay (overlayp overlay))
     (when-let* ((metadata (gethash overlay blame-reveal--overlay-registry)))
       (let ((type (plist-get metadata :type))
@@ -189,7 +202,8 @@ Also removes overlays from registry if they were registered."
 
 (defmacro blame-reveal--with-no-flicker (&rest body)
   "Execute BODY with flicker prevention.
-Wraps operations in `inhibit-redisplay' and forces a single `redisplay' at the end."
+Wrap operations in `inhibit-redisplay' and force one `redisplay'
+at the end."
   `(prog1
        (let ((inhibit-redisplay t))
          ,@body)
@@ -352,18 +366,6 @@ Uses delayed deletion to prevent visible gap."
 
 ;;; Loading Animation
 
-(defun blame-reveal--should-update-header-p ()
-  "Check if header update should proceed.
-Returns nil when:
-- Transient menu is being set up (first-time setup interference)
-- Minibuffer is active
-- Current buffer is not the selected window's buffer
-- Buffer is not visiting a file"
-  (and (not blame-reveal--in-transient-setup)
-       (not (active-minibuffer-window))
-       (eq (current-buffer) (window-buffer (selected-window)))
-       (buffer-file-name)))
-
 (defun blame-reveal--get-loading-gradient-color (intensity)
   "Get loading animation color with INTENSITY (0.0 to 1.0).
 Dark theme: intensity controls brightness (0=dark, 1=bright).
@@ -404,7 +406,8 @@ Light theme: intensity controls darkness (0=light/invisible, 1=dark/visible)."
     face-name))
 
 (defun blame-reveal--calculate-loading-intensity (index current-pos num-indicators)
-  "Calculate loading animation intensity for INDEX given CURRENT-POS and NUM-INDICATORS."
+  "Calculate loading animation intensity for INDEX.
+CURRENT-POS is the current animation position in NUM-INDICATORS."
   (let* ((raw-offset (- index current-pos))
          (offset (cond
                   ((> raw-offset (/ num-indicators 2.0))
@@ -608,19 +611,29 @@ Only recent commits are permanently visible."
   "Check if current line cache is valid for LINE-NUM."
   (when-let* ((blame-reveal--current-line-cache)
               (cached-commit (nth 1 blame-reveal--current-line-cache))
+              (cached-start (nth 2 blame-reveal--current-line-cache))
+              (cached-end (nth 3 blame-reveal--current-line-cache))
               (entry (assoc line-num blame-reveal--blame-data)))
-    (equal (cdr entry) cached-commit)))
+    (and (equal (cdr entry) cached-commit)
+         (<= cached-start line-num cached-end))))
 
-(defun blame-reveal--find-block-at-line (line-num)
-  "Find the block containing LINE-NUM.
-Returns (COMMIT-HASH . BLOCK-START) or nil."
+(defun blame-reveal--find-block-info-at-line (line-num)
+  "Find block metadata containing LINE-NUM.
+Return (COMMIT-HASH BLOCK-START BLOCK-END), or nil if not found."
   (cl-loop for block in (blame-reveal--find-block-boundaries blame-reveal--blame-data)
            for block-start = (nth 0 block)
            for block-commit = (nth 1 block)
            for block-length = (nth 2 block)
+           for block-end = (+ block-start block-length -1)
            when (and (>= line-num block-start)
-                     (< line-num (+ block-start block-length)))
-           return (cons block-commit block-start)))
+                     (<= line-num block-end))
+           return (list block-commit block-start block-end)))
+
+(defun blame-reveal--find-block-at-line (line-num)
+  "Find the block containing LINE-NUM.
+Returns (COMMIT-HASH . BLOCK-START) or nil."
+  (when-let* ((block-info (blame-reveal--find-block-info-at-line line-num)))
+    (cons (nth 0 block-info) (nth 1 block-info))))
 
 (defun blame-reveal--find-block-from-overlay (line-num)
   "Try to find block info from overlays at point for LINE-NUM.
@@ -647,20 +660,27 @@ Uses caching to avoid repeated searches within the same block."
         (cons (nth 1 blame-reveal--current-line-cache)
               (nth 2 blame-reveal--current-line-cache))
       ;; Cache miss
-      (let ((result (or (blame-reveal--find-block-from-overlay line-num)
-                        (blame-reveal--find-block-at-line line-num))))
-        (when result
+      (let* ((result (or (blame-reveal--find-block-from-overlay line-num)
+                         (blame-reveal--find-block-at-line line-num)))
+             (block-info (and result
+                              (blame-reveal--find-block-info-at-line line-num))))
+        (when block-info
           (setq blame-reveal--current-line-cache
-                (list line-num (car result) (cdr result))))
+                (list line-num
+                      (nth 0 block-info)
+                      (nth 1 block-info)
+                      (nth 2 block-info))))
         result))))
 
 (defun blame-reveal--should-update-header-p ()
   "Check if header update should proceed.
 Returns nil when:
+- Transient menu is being set up
 - Minibuffer is active (any menu/completion system)
 - Current buffer is not the selected window's buffer
 - Buffer is not visiting a file"
-  (and (not (active-minibuffer-window))
+  (and (not blame-reveal--in-transient-setup)
+       (not (active-minibuffer-window))
        (eq (current-buffer) (window-buffer (selected-window)))
        (buffer-file-name)))
 
@@ -683,6 +703,7 @@ Throttles updates to avoid excessive calls during rapid cursor movement."
 
           ;; Throttle: Skip updates if they are in the same line or the same commit block.
           (when (or (not blame-reveal--last-update-line)
+                    (not blame-reveal--header-overlay)
                     (not (equal blame-reveal--last-update-line current-line))
                     (not (equal blame-reveal--last-rendered-commit commit-hash)))
 
@@ -786,14 +807,15 @@ Uses in-place update for smooth transitions without flicker."
 
 (defun blame-reveal--scroll-handler (_win _start)
   "Handle window scroll events with debouncing."
-  (let ((current-start (window-start)))
-    (unless (equal current-start blame-reveal--last-window-start)
-      (setq blame-reveal--last-window-start current-start)
+  (let ((current-start (window-start))
+        (current-vscroll (window-vscroll nil t)))
+    (unless (and (equal current-start blame-reveal--last-window-start)
+                 (equal current-vscroll blame-reveal--last-window-vscroll))
+      (setq blame-reveal--last-window-start current-start
+            blame-reveal--last-window-vscroll current-vscroll)
       (when blame-reveal--scroll-timer
         (cancel-timer blame-reveal--scroll-timer))
       (blame-reveal--clear-overlays-by-type 'fringe)
-      (unless blame-reveal--in-transient-setup
-        (blame-reveal--clear-header))
       (setq blame-reveal--scroll-timer
             (run-with-idle-timer
              blame-reveal--scroll-render-delay nil
