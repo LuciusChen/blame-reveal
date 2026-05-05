@@ -164,7 +164,7 @@ Now uses unified flicker-free system - no special handling needed."
 (transient-define-suffix blame-reveal--toggle-scope ()
   "Toggle between buffer-local and global scope for settings."
   :key "="
-  :description (lambda ()
+  :description #'(lambda ()
                  (if (blame-reveal--buffer-local-p)
                      "Scope: Buffer"
                    "Scope: Global"))
@@ -246,12 +246,77 @@ Now uses unified flicker-free system - no special handling needed."
     (blame-reveal--force-update-header))
   (transient-setup 'blame-reveal-menu))
 
+(defun blame-reveal--set-header-style-block ()
+  "Set header style to block."
+  (interactive)
+  (blame-reveal--set-header-style 'block))
+
+(defun blame-reveal--set-header-style-inline ()
+  "Set header style to inline."
+  (interactive)
+  (blame-reveal--set-header-style 'inline))
+
+(defun blame-reveal--set-header-style-margin ()
+  "Set header style to margin."
+  (interactive)
+  (blame-reveal--set-header-style 'margin))
+
+(defun blame-reveal--set-fringe-side-left ()
+  "Set fringe side to left fringe."
+  (interactive)
+  (blame-reveal--set-fringe-side 'left-fringe))
+
+(defun blame-reveal--set-fringe-side-right ()
+  "Set fringe side to right fringe."
+  (interactive)
+  (blame-reveal--set-fringe-side 'right-fringe))
+
+(defun blame-reveal--set-margin-side-left ()
+  "Set margin side to left."
+  (interactive)
+  (blame-reveal--set-margin-side 'left))
+
+(defun blame-reveal--set-margin-side-right ()
+  "Set margin side to right."
+  (interactive)
+  (blame-reveal--set-margin-side 'right))
+
+(defun blame-reveal--apply-color-preset-blue ()
+  "Apply blue color preset."
+  (interactive)
+  (blame-reveal--apply-color-preset 'blue))
+
+(defun blame-reveal--apply-color-preset-green ()
+  "Apply green color preset."
+  (interactive)
+  (blame-reveal--apply-color-preset 'green))
+
+(defun blame-reveal--apply-color-preset-purple ()
+  "Apply purple color preset."
+  (interactive)
+  (blame-reveal--apply-color-preset 'purple))
+
+(defun blame-reveal--apply-color-preset-orange ()
+  "Apply orange color preset."
+  (interactive)
+  (blame-reveal--apply-color-preset 'orange))
+
+(defun blame-reveal--apply-color-preset-subtle ()
+  "Apply subtle color preset."
+  (interactive)
+  (blame-reveal--apply-color-preset 'subtle))
+
+(defun blame-reveal--apply-color-preset-vivid ()
+  "Apply vivid color preset."
+  (interactive)
+  (blame-reveal--apply-color-preset 'vivid))
+
 ;;; Move/Copy Detection
 
 (transient-define-suffix blame-reveal-toggle-move-detection ()
   "Toggle move/copy detection and reload."
   :key "M"
-  :description (lambda ()
+  :description #'(lambda ()
                  (if blame-reveal--detect-moves
                      "Move/copy: Enabled"
                    "Move/copy: Disabled"))
@@ -277,7 +342,7 @@ Now uses unified flicker-free system - no special handling needed."
   :display-nil "All"
   :display-map (blame-reveal--get-display-map 'days-limit)
   :key "D"
-  :reader (lambda (prompt _ _)
+  :reader #'(lambda (prompt _ _)
             (let ((choice (completing-read
                            prompt '("auto" "all" "30" "90" "180" "365" "custom")
                            nil t)))
@@ -294,7 +359,7 @@ Now uses unified flicker-free system - no special handling needed."
   :variable 'blame-reveal-gradient-quality
   :display-map (blame-reveal--get-display-map 'gradient-quality)
   :key "Q"
-  :reader (lambda (prompt _ _)
+  :reader #'(lambda (prompt _ _)
             (intern (completing-read
                      prompt '("strict" "auto" "relaxed")
                      nil t))))
@@ -380,11 +445,11 @@ Now uses unified flicker-free system - no special handling needed."
   "Select header display style."
   ["Header Style"
    ("b" "Block (above code)"
-    (lambda () (interactive) (blame-reveal--set-header-style 'block)))
+    blame-reveal--set-header-style-block)
    ("i" "Inline (after first line)"
-    (lambda () (interactive) (blame-reveal--set-header-style 'inline)))
+    blame-reveal--set-header-style-inline)
    ("m" "Margin (left/right margin)"
-    (lambda () (interactive) (blame-reveal--set-header-style 'margin)))]
+    blame-reveal--set-header-style-margin)]
   ["Actions"
    ("q" "Back" transient-quit-one)])
 
@@ -392,25 +457,25 @@ Now uses unified flicker-free system - no special handling needed."
   "Select fringe side for blame indicators."
   ["Fringe Side"
    ("l" "Left fringe"
-    (lambda () (interactive) (blame-reveal--set-fringe-side 'left-fringe)))
+    blame-reveal--set-fringe-side-left)
    ("r" "Right fringe"
-    (lambda () (interactive) (blame-reveal--set-fringe-side 'right-fringe)))]
+    blame-reveal--set-fringe-side-right)]
   ["Actions"
    ("q" "Back" transient-quit-one)])
 
 (transient-define-prefix blame-reveal-margin-side-menu ()
   "Select margin side (when header style is margin)."
   [:description
-   (lambda ()
-     (if (eq blame-reveal-header-style 'margin)
-         "Margin Side"
-       "Margin Side (only active when header style is 'margin')"))
+   #'(lambda ()
+       (if (eq blame-reveal-header-style 'margin)
+           "Margin Side"
+         "Margin Side (only active when header style is 'margin')"))
    ("l" "Left margin"
-    (lambda () (interactive) (blame-reveal--set-margin-side 'left))
-    :inapt-if-not (lambda () (eq blame-reveal-header-style 'margin)))
+    blame-reveal--set-margin-side-left
+    :inapt-if-not #'(lambda () (eq blame-reveal-header-style 'margin)))
    ("r" "Right margin"
-    (lambda () (interactive) (blame-reveal--set-margin-side 'right))
-    :inapt-if-not (lambda () (eq blame-reveal-header-style 'margin)))]
+    blame-reveal--set-margin-side-right
+    :inapt-if-not #'(lambda () (eq blame-reveal-header-style 'margin)))]
   ["Actions"
    ("q" "Back" transient-quit-one)])
 
@@ -418,15 +483,15 @@ Now uses unified flicker-free system - no special handling needed."
 (transient-define-prefix blame-reveal-color-scheme-menu ()
   "Configure color scheme."
   [:description
-   (lambda () (format "Color Scheme [H:%d°]"
-                      (plist-get blame-reveal-color-scheme :hue)))
+   #'(lambda () (format "Color Scheme [H:%d°]"
+                        (plist-get blame-reveal-color-scheme :hue)))
    ["Quick Presets"
-    ("1" "Blue"   (lambda () (interactive) (blame-reveal--apply-color-preset 'blue))   :transient t)
-    ("2" "Green"  (lambda () (interactive) (blame-reveal--apply-color-preset 'green))  :transient t)
-    ("3" "Purple" (lambda () (interactive) (blame-reveal--apply-color-preset 'purple)) :transient t)
-    ("4" "Orange" (lambda () (interactive) (blame-reveal--apply-color-preset 'orange)) :transient t)
-    ("5" "Subtle" (lambda () (interactive) (blame-reveal--apply-color-preset 'subtle)) :transient t)
-    ("6" "Vivid"  (lambda () (interactive) (blame-reveal--apply-color-preset 'vivid))  :transient t)]
+    ("1" "Blue"   blame-reveal--apply-color-preset-blue   :transient t)
+    ("2" "Green"  blame-reveal--apply-color-preset-green  :transient t)
+    ("3" "Purple" blame-reveal--apply-color-preset-purple :transient t)
+    ("4" "Orange" blame-reveal--apply-color-preset-orange :transient t)
+    ("5" "Subtle" blame-reveal--apply-color-preset-subtle :transient t)
+    ("6" "Vivid"  blame-reveal--apply-color-preset-vivid  :transient t)]
    ["Hue"
     ("h" "Hue (0-360)" blame-reveal--edit-hue)]
    ["Dark Theme"
@@ -459,7 +524,7 @@ Now uses unified flicker-free system - no special handling needed."
   :class 'transient-lisp-variable
   :variable 'blame-reveal-lazy-load-threshold
   :key "L"
-  :reader (lambda (prompt _ _)
+  :reader #'(lambda (prompt _ _)
             (read-number prompt blame-reveal-lazy-load-threshold)))
 
 (transient-define-infix blame-reveal--infix-async-blame ()
@@ -469,7 +534,7 @@ Now uses unified flicker-free system - no special handling needed."
   :variable 'blame-reveal-async-blame
   :display-map (blame-reveal--get-display-map 'async-blame)
   :key "a"
-  :reader (lambda (prompt _ _)
+  :reader #'(lambda (prompt _ _)
             (let ((choice (completing-read
                            prompt '("auto" "always" "never")
                            nil t)))

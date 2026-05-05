@@ -41,7 +41,7 @@
 
 (defvar blame-reveal-mode)
 (defvar blame-reveal-mode-map)
-(defvar-local blame-reveal--last-rendered-block-start)
+(defvar-local blame-reveal--last-rendered-block-start nil)
 
 ;;; Customization
 
