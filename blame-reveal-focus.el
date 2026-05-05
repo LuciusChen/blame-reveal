@@ -4,7 +4,7 @@
 
 ;; Author: Lucius Chen
 ;; Version: 0.1
-;; Package-Requires: ((emacs "27.1") (blame-reveal "0.5"))
+;; Package-Requires: ((emacs "28.1") (blame-reveal "0.5"))
 ;; Keywords: git, vc, convenience
 
 ;;; Commentary:

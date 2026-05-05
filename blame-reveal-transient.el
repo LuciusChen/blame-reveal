@@ -6,7 +6,7 @@
 ;; Maintainer: Lucius Chen <chenyh572@gmail.com>
 ;; Version: 0.5
 ;; Keywords: convenience, vc, git
-;; Package-Requires: ((emacs "27.1") (transient "0.4.0"))
+;; Package-Requires: ((emacs "28.1") (transient "0.4.0"))
 ;; URL: https://github.com/LuciusChen/blame-reveal
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later

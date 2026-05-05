@@ -4,7 +4,7 @@
 ;; Author: Lucius Chen <chenyh572@gmail.com>
 ;; Maintainer: Lucius Chen <chenyh572@gmail.com>
 ;; Version: 0.5
-;; Package-Requires: ((emacs "27.1") (transient "0.4.0"))
+;; Package-Requires: ((emacs "28.1") (transient "0.4.0"))
 ;; Keywords: git, vc, convenience
 ;; URL: https://github.com/LuciusChen/blame-reveal
 

@@ -14,7 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         emacs-version:
-          - "27.2"
+          - "28.2"
           - "29.4"
 
     steps:
@@ -24,7 +24,7 @@ jobs:
         with:
           version: ${{ matrix.emacs-version }}
 
-      - name: Install runtime dependencies
+      - name: Install package dependencies
         run: |
           emacs -Q --batch \
             --eval "(require 'package)" \
@@ -32,18 +32,7 @@ jobs:
             --eval "(add-to-list 'package-archives '(\"gnu\" . \"https://elpa.gnu.org/packages/\") t)" \
             --eval "(package-initialize)" \
             --eval "(package-refresh-contents)" \
-            --eval "(dolist (pkg '(transient)) (unless (package-installed-p pkg) (package-install pkg)))"
-
-      - name: Install lint dependencies
-        if: matrix.emacs-version != '27.2'
-        run: |
-          emacs -Q --batch \
-            --eval "(require 'package)" \
-            --eval "(add-to-list 'package-archives '(\"melpa\" . \"https://melpa.org/packages/\") t)" \
-            --eval "(add-to-list 'package-archives '(\"gnu\" . \"https://elpa.gnu.org/packages/\") t)" \
-            --eval "(package-initialize)" \
-            --eval "(package-refresh-contents)" \
-            --eval "(dolist (pkg '(package-lint)) (unless (package-installed-p pkg) (package-install pkg)))"
+            --eval "(dolist (pkg '(transient package-lint)) (unless (package-installed-p pkg) (package-install pkg)))"
 
       - name: Byte compile
         run: |
@@ -56,7 +45,6 @@ jobs:
             *.el
 
       - name: Package lint
-        if: matrix.emacs-version != '27.2'
         run: |
           emacs -Q --batch \
             --eval "(require 'package)" \

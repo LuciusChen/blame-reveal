@@ -193,7 +193,7 @@ Use =M-x blame-reveal-show-auto-calculation= to see how the time window is compu
 
 ** Requirements
 
-- Emacs 27.1+
+- Emacs 28.1+
 - Git CLI
 - transient
 - Optional: Magit, diff-hl, nerd-icons
