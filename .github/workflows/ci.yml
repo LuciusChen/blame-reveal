@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  elisp:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        emacs-version:
+          - "27.2"
+          - "29.4"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: purcell/setup-emacs@master
+        with:
+          version: ${{ matrix.emacs-version }}
+
+      - name: Install package dependencies
+        run: |
+          emacs -Q --batch \
+            --eval "(require 'package)" \
+            --eval "(add-to-list 'package-archives '(\"melpa\" . \"https://melpa.org/packages/\") t)" \
+            --eval "(add-to-list 'package-archives '(\"gnu\" . \"https://elpa.gnu.org/packages/\") t)" \
+            --eval "(package-initialize)" \
+            --eval "(package-refresh-contents)" \
+            --eval "(dolist (pkg '(transient package-lint)) (unless (package-installed-p pkg) (package-install pkg)))"
+
+      - name: Byte compile
+        run: |
+          emacs -Q --batch \
+            --eval "(require 'package)" \
+            --eval "(package-initialize)" \
+            --eval "(setq byte-compile-error-on-warn t)" \
+            -L . \
+            -f batch-byte-compile \
+            *.el
+
+      - name: Package lint
+        run: |
+          emacs -Q --batch \
+            --eval "(require 'package)" \
+            --eval "(package-initialize)" \
+            -L . \
+            -l package-lint \
+            -f package-lint-batch-and-exit \
+            blame-reveal.el
+
+      - name: Checkdoc entry file
+        run: |
+          emacs -Q --batch \
+            --eval "(require 'package)" \
+            --eval "(package-initialize)" \
+            -L . \
+            --eval "(require 'checkdoc)" \
+            --eval "(checkdoc-file \"blame-reveal.el\")" \
+            --eval "(when (get-buffer \"*warn*\") (with-current-buffer \"*warn*\" (goto-char (point-min)) (when (re-search-forward \"^Warning\" nil t) (princ (buffer-string)) (kill-emacs 1))))"
+
+      - name: Autoload smoke test
+        run: |
+          emacs -Q --batch \
+            --eval "(require 'autoload)" \
+            -L . \
+            --eval "(let ((generated-autoload-file (expand-file-name \"blame-reveal-autoloads.el\" temporary-file-directory))) (dolist (file '(\"blame-reveal.el\" \"blame-reveal-recursive.el\" \"blame-reveal-focus.el\" \"blame-reveal-transient.el\")) (update-file-autoloads file t generated-autoload-file)) (with-temp-buffer (insert-file-contents generated-autoload-file) (when (search-forward \"transient-define-prefix\" nil t) (error \"transient macro leaked into generated autoloads\"))))"
+
+      - name: Load smoke test
+        run: |
+          emacs -Q --batch \
+            --eval "(require 'package)" \
+            --eval "(package-initialize)" \
+            -L . \
+            --eval "(dolist (feature '(blame-reveal blame-reveal-recursive blame-reveal-focus blame-reveal-transient)) (require feature))"

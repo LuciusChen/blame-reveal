@@ -54,7 +54,7 @@ Navigate line history through parent commits (=b=), or lock onto a single commit
   ;; Optional: recursive blame and focus mode
   (require 'blame-reveal-recursive)
   (require 'blame-reveal-focus)
-  ;; Optional: transient menu (requires transient package)
+  ;; Optional for source checkouts: transient menu
   (require 'blame-reveal-transient))
 #+end_src
 
@@ -66,23 +66,23 @@ M-x blame-reveal-mode
 
 ** Keybindings
 
-Prefix keybindings (=C-c l=):
+Prefix keybindings (=C-c C-l=):
 
 | Key         | Action                      |
 |-------------+-----------------------------|
-| =C-c l m=   | Open transient menu         |
-| =C-c l q=   | Toggle mode                 |
-| =C-c l c=   | Copy commit hash            |
-| =C-c l d=   | Show commit diff            |
-| =C-c l s=   | Show commit details         |
-| =C-c l h=   | File history                |
-| =C-c l l=   | Line history                |
-| =C-c l b=   | Blame parent (recursive)    |
-| =C-c l p= / =C-c l ^= | Go back in blame stack |
-| =C-c l g=   | Blame at specific revision  |
-| =C-c l r=   | Reset to HEAD               |
-| =C-c l f=   | Toggle focus mode           |
-| =C-c l n= / =C-c l N= | Navigate focus blocks |
+| =C-c C-l m= | Open transient menu         |
+| =C-c C-l q= | Toggle mode                 |
+| =C-c C-l c= | Copy commit hash            |
+| =C-c C-l d= | Show commit diff            |
+| =C-c C-l s= | Show commit details         |
+| =C-c C-l h= | File history                |
+| =C-c C-l l= | Line history                |
+| =C-c C-l b= | Blame parent (recursive)    |
+| =C-c C-l p= / =C-c C-l ^= | Go back in blame stack |
+| =C-c C-l g= | Blame at specific revision  |
+| =C-c C-l r= | Reset to HEAD               |
+| =C-c C-l f= | Toggle focus mode           |
+| =C-c C-l n= / =C-c C-l N= | Navigate focus blocks |
 
 ** Configuration
 
@@ -195,7 +195,8 @@ Use =M-x blame-reveal-show-auto-calculation= to see how the time window is compu
 
 - Emacs 27.1+
 - Git CLI
-- Optional: Magit, diff-hl, nerd-icons, transient
+- transient
+- Optional: Magit, diff-hl, nerd-icons
 
 ** License
 

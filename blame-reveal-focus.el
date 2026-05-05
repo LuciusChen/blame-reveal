@@ -39,6 +39,10 @@
 (require 'blame-reveal-color)
 (require 'blame-reveal-header)
 
+(defvar blame-reveal-mode)
+(defvar blame-reveal-mode-map)
+(defvar-local blame-reveal--last-rendered-block-start)
+
 ;;; Customization
 
 (defgroup blame-reveal-focus nil
@@ -59,7 +63,8 @@ If nil, use the commit's normal color (from the gradient)."
   :group 'blame-reveal-focus)
 
 (defcustom blame-reveal-focus-color "#6699ff"
-  "Color used for focused commit fringe when `blame-reveal-focus-use-special-color' is t."
+  "Color used for focused commit fringe.
+This is used when `blame-reveal-focus-use-special-color' is t."
   :type 'color
   :group 'blame-reveal-focus)
 
@@ -72,7 +77,8 @@ are highlighted in the fringe.")
 
 (defvar-local blame-reveal--focus-block-cache nil
   "Cached list of blocks belonging to the focused commit.
-Each element is (START-LINE COMMIT-HASH LENGTH) from `blame-reveal--find-block-boundaries'.
+Each element is (START-LINE COMMIT-HASH LENGTH) from
+`blame-reveal--find-block-boundaries'.
 Invalidated when focused commit changes.")
 
 ;;; Focus Mode State Management
@@ -322,13 +328,13 @@ When entering focus mode:
 - All lines belonging to the current commit are highlighted
 - Fringe indicators only show for the focused commit
 - Header and sticky header always display focused commit info
-- Use 'n' and 'N' to navigate between blocks
+- Use `n' and `N' to navigate between blocks
 
 When exiting focus mode:
 - Normal blame display is restored"
   (interactive)
   (unless blame-reveal-mode
-    (user-error "blame-reveal-mode is not enabled"))
+    (user-error "Blame-reveal mode is not enabled"))
 
   (if (blame-reveal-focus--active-p)
       ;; Already in focus mode - toggle off
@@ -350,7 +356,7 @@ In focus mode, this navigates to the next occurrence of lines
 modified by the locked commit."
   (interactive)
   (unless (blame-reveal-focus--active-p)
-    (user-error "Focus mode is not active. Press 'F' to enter focus mode."))
+    (user-error "Focus mode is not active. Press F to enter focus mode."))
 
   (let ((next-block (blame-reveal-focus--find-next-block)))
     (if next-block
@@ -371,7 +377,7 @@ In focus mode, this navigates to the previous occurrence of lines
 modified by the locked commit."
   (interactive)
   (unless (blame-reveal-focus--active-p)
-    (user-error "Focus mode is not active. Press 'F' to enter focus mode."))
+    (user-error "Focus mode is not active. Press F to enter focus mode."))
 
   (let ((prev-block (blame-reveal-focus--find-next-block t)))
     (if prev-block

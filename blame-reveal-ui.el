@@ -10,6 +10,10 @@
 (require 'blame-reveal-git)
 (require 'blame-reveal-color)
 
+(defvar blame-reveal-color-scheme)
+(defvar blame-reveal-mode)
+(defvar blame-reveal-temp-overlay-delay)
+
 ;;; Transient Protection
 ;; Prevents header interference during transient menu operations.
 ;; This ensures a smooth UI experience when using transient commands.
@@ -20,7 +24,8 @@ Set to t when transient-setup begins, cleared after it completes.")
 
 (defvar-local blame-reveal--pending-delete-overlays nil
   "List of overlays pending deletion.
-These overlays will be deleted after the next redisplay cycle to prevent flicker.")
+These overlays will be deleted after the next redisplay cycle to
+prevent flicker.")
 
 ;;; Registry Initialization
 
@@ -57,7 +62,8 @@ Returns the overlay."
 (defun blame-reveal--unregister-overlay (overlay)
   "Unregister OVERLAY from all indices and delete it.
 Safe to call even if overlay is already deleted or invalid.
-Note: This performs immediate deletion, use `blame-reveal--schedule-overlay-deletion'
+Note: This performs immediate deletion.
+Use `blame-reveal--schedule-overlay-deletion'
 for flicker-free updates."
   (when (and overlay (overlayp overlay))
     (when-let* ((metadata (gethash overlay blame-reveal--overlay-registry)))
@@ -189,7 +195,8 @@ Also removes overlays from registry if they were registered."
 
 (defmacro blame-reveal--with-no-flicker (&rest body)
   "Execute BODY with flicker prevention.
-Wraps operations in `inhibit-redisplay' and forces a single `redisplay' at the end."
+Wraps operations in `inhibit-redisplay' and forces one `redisplay'
+at the end."
   `(prog1
        (let ((inhibit-redisplay t))
          ,@body)
@@ -404,7 +411,8 @@ Light theme: intensity controls darkness (0=light/invisible, 1=dark/visible)."
     face-name))
 
 (defun blame-reveal--calculate-loading-intensity (index current-pos num-indicators)
-  "Calculate loading animation intensity for INDEX given CURRENT-POS and NUM-INDICATORS."
+  "Calculate loading animation intensity.
+INDEX is compared against CURRENT-POS in a NUM-INDICATORS cycle."
   (let* ((raw-offset (- index current-pos))
          (offset (cond
                   ((> raw-offset (/ num-indicators 2.0))
@@ -653,16 +661,6 @@ Uses caching to avoid repeated searches within the same block."
           (setq blame-reveal--current-line-cache
                 (list line-num (car result) (cdr result))))
         result))))
-
-(defun blame-reveal--should-update-header-p ()
-  "Check if header update should proceed.
-Returns nil when:
-- Minibuffer is active (any menu/completion system)
-- Current buffer is not the selected window's buffer
-- Buffer is not visiting a file"
-  (and (not (active-minibuffer-window))
-       (eq (current-buffer) (window-buffer (selected-window)))
-       (buffer-file-name)))
 
 (defun blame-reveal--update-header ()
   "Update header display based on cursor position.

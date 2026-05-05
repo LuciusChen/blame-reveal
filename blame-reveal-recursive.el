@@ -60,7 +60,7 @@ Sets GIT_PAGER=cat and PAGER=cat for consistent parsing."
 
 (defun blame-reveal--get-base-commit (revision)
   "Extract base commit hash from parent reference REVISION.
-For example, 'abc123^' returns 'abc123'."
+For example, abc123^ returns abc123."
   (when (string-match "^\\([a-f0-9]+\\)\\^+$" revision)
     (match-string 1 revision)))
 
@@ -107,7 +107,8 @@ Returns (PREV-FILE . PREV-COMMIT) or nil."
 
 (defun blame-reveal--save-current-state ()
   "Save current blame state to stack.
-On first recursive blame from HEAD, also saves initial HEAD state at bottom of stack."
+On first recursive blame from HEAD, also saves initial HEAD state at
+the bottom of stack."
   ;; Special case: First recursive blame from HEAD
   ;; Save a pristine HEAD state at the bottom of the stack for smooth reset
   (when (and (null blame-reveal--blame-stack)
@@ -293,7 +294,7 @@ Returns non-nil on success, nil if user cancels."
         (message "Staying at current location")
         nil)))))
 
-(defun blame-reveal--view-file-at-revision (relative-file commit git-root)
+(defun blame-reveal--view-file-at-revision (relative-file commit _git-root)
   "View the historical content of RELATIVE-FILE at COMMIT in a new buffer.
 
 This function handles the crucial step of setting the Major Mode for
@@ -403,7 +404,7 @@ Returns the new buffer on success, nil on failure."
 (defun blame-reveal--get-blame-data-sync (revision file &optional range)
   "Get git blame data for FILE at REVISION synchronously.
 If RANGE is (START-LINE . END-LINE), only blame that range.
-REVISION can be commit hash or 'uncommitted for working tree.
+REVISION can be commit hash or `uncommitted' for working tree.
 Returns (BLAME-DATA . MOVE-METADATA)."
   (let ((git-root (vc-git-root file)))
     (when git-root
@@ -498,10 +499,10 @@ Always loads complete file for proper recursive blame navigation."
 (defun blame-reveal--analyze-recursive-target (commit-hash)
   "Analyze where to navigate from COMMIT-HASH.
 Returns a plist with:
-  :action - Symbol: 'stop, 'follow-file, or 'blame-parent
+  :action - Symbol: `stop', `follow-file', or `blame-parent'
   :message - String to display to user
-  :target-file - File to follow (for 'follow-file action)
-  :target-commit - Commit to blame (for 'follow-file or 'blame-parent)"
+  :target-file - File to follow (for `follow-file' action)
+  :target-commit - Commit to blame (for `follow-file' or `blame-parent')"
   (let* ((root (vc-git-root (buffer-file-name)))
          (current-file (file-relative-name (buffer-file-name) root))
          (prev-loc (blame-reveal--get-previous-location commit-hash))

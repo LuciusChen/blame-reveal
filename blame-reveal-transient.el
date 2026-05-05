@@ -2,9 +2,12 @@
 
 ;; Copyright (C) 2024 Lucius Chen
 
-;; Author: Lucius Chen
+;; Author: Lucius Chen <chenyh572@gmail.com>
+;; Maintainer: Lucius Chen <chenyh572@gmail.com>
+;; Version: 0.5
 ;; Keywords: convenience, vc, git
-;; Package-Requires: ((emacs "29.1") (transient "0.4.0"))
+;; Package-Requires: ((emacs "27.1") (transient "0.4.0"))
+;; URL: https://github.com/LuciusChen/blame-reveal
 
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -181,7 +184,7 @@ Now uses unified flicker-free system - no special handling needed."
 
 ;;; Auto-refresh after header-style change
 
-(cl-defmethod transient-infix-set :after ((obj blame-reveal-lisp-variable) value)
+(cl-defmethod transient-infix-set :after ((obj blame-reveal-lisp-variable) _value)
   "Refresh display and transient menu after setting certain variables."
   (let ((var (oref obj variable)))
     (cond
@@ -411,7 +414,7 @@ Now uses unified flicker-free system - no special handling needed."
   ["Actions"
    ("q" "Back" transient-quit-one)])
 
-;;;###autoload
+;;;###autoload (autoload 'blame-reveal-color-scheme-menu "blame-reveal-transient" nil t)
 (transient-define-prefix blame-reveal-color-scheme-menu ()
   "Configure color scheme."
   [:description
@@ -519,7 +522,7 @@ Now uses unified flicker-free system - no special handling needed."
     (blame-reveal--full-update))
   (message "Applied minimal preset"))
 
-;;;###autoload
+;;;###autoload (autoload 'blame-reveal-presets "blame-reveal-transient" nil t)
 (transient-define-prefix blame-reveal-presets ()
   "Manage blame-reveal presets."
   ["Presets"
@@ -529,7 +532,7 @@ Now uses unified flicker-free system - no special handling needed."
    [("q" "Back" transient-quit-one)]])
 
 ;;; Main Transient Menu
-;;;###autoload
+;;;###autoload (autoload 'blame-reveal-menu "blame-reveal-transient" nil t)
 (transient-define-prefix blame-reveal-menu ()
   "Transient menu for blame-reveal configuration."
   [:description blame-reveal--menu-title

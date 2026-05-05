@@ -13,6 +13,13 @@
 (require 'blame-reveal-color)
 (require 'cl-lib)
 
+(defvar blame-reveal-block-format-function)
+(defvar blame-reveal-fringe-side)
+(defvar blame-reveal-header-style)
+(defvar blame-reveal-margin-side)
+(defvar blame-reveal-show-uncommitted-fringe)
+(defvar blame-reveal-uncommitted-label)
+
 ;;; Time Formatting Constants
 
 (defconst blame-reveal--time-formats
@@ -88,7 +95,7 @@ Logs a warning message if compression occurs.
 
 Arguments:
   DISPLAY - A `blame-reveal-commit-display' struct
-  STYLE   - Symbol, either 'inline or 'margin
+  STYLE   - Symbol, either `inline' or `margin'
 
 Returns:
   Modified `blame-reveal-commit-display' struct with single line."
@@ -134,8 +141,7 @@ Returns the configured side when in margin mode, nil otherwise."
       ;; Calculate width based on actual formatted output
       (maphash (lambda (hash info)
                  (when info
-                   (let* ((color (blame-reveal--get-commit-color hash))
-                          ;; Get actual formatted display using custom function
+                   (let* (;; Get actual formatted display using custom function
                           (display (blame-reveal--get-formatted-display hash 'margin))
                           (formatted-text (car (blame-reveal-commit-display-lines display)))
                           (actual-width (length formatted-text)))
@@ -197,7 +203,8 @@ Saves original margin widths and applies calculated width to configured side."
 
 (defun blame-reveal--icon (name &optional color fallback)
   "Return icon for NAME using nerd-icons backends.
-NAME like 'nf-PREFIX-ICONNAME'. COLOR sets :foreground; FALLBACK if unavailable."
+NAME uses the nf-PREFIX-ICONNAME form.
+COLOR sets :foreground; FALLBACK is used if unavailable."
   (let* ((face (when color `(:foreground ,color)))
          (backend (and (string-match "^nf-\\([^-]+\\)-" name)
                        (cdr (assoc (match-string 1 name)
@@ -406,15 +413,16 @@ up to the two largest time units, assuming Git-like relative time format."
 
 Arguments:
   COMMIT-HASH - Commit hash string
-  STYLE       - Symbol: 'block, 'inline, or 'margin
+  STYLE       - Symbol: `block', `inline', or `margin'
 
 Returns:
-  A `blame-reveal-commit-display' struct formatted for the requested style.
+  A `blame-reveal-commit-display' struct formatted for STYLE.
 
 Processing flow:
   - Block:  Uses user's block format function
   - Inline: Uses custom inline function if set, otherwise uses default
-  - Margin: Uses custom margin function if set, otherwise uses default compact format
+  - Margin: Uses custom margin function if set, otherwise uses default
+    compact format
 
 For inline and margin styles, ensures the result is single-line."
 (let* ((info (gethash commit-hash blame-reveal--commit-info))
@@ -447,7 +455,8 @@ For inline and margin styles, ensures the result is single-line."
 (defun blame-reveal--format-block-string (lines faces fringe-face show-fringe
                                                 need-leading-newline &optional sticky-indicator)
   "Format header content string.
-If STICKY-INDICATOR is provided, it should be a propertized string with face already applied."
+If STICKY-INDICATOR is provided, it should be a propertized string
+with face already applied."
   (let ((result (if need-leading-newline "\n" ""))
         (line-count (length lines)))
     (dotimes (i line-count)
@@ -608,8 +617,9 @@ If STICKY-INDICATOR is provided, it should be a propertized string with face alr
            (blame-reveal--get-effective-header-style))))
 
 (defun blame-reveal--render-style-data (commit-hash style color no-fringe &optional sticky-indicator)
-  "Calculate overlay properties (string-type, position-fn, content) for STYLE.
-Returns a plist containing :string-type, :content, :position-fn, and :end-pos-fn."
+  "Calculate overlay properties for COMMIT-HASH in STYLE.
+COLOR is the fringe color.  NO-FRINGE suppresses fringe rendering.
+STICKY-INDICATOR is prepended when non-nil."
   (let* ((display (blame-reveal--get-formatted-display commit-hash style))
          (fringe-face (blame-reveal--ensure-fringe-face color))
          (show-fringe (not no-fringe)))
@@ -633,7 +643,7 @@ Returns a plist containing :string-type, :content, :position-fn, and :end-pos-fn
                                  (propertize "\n!" 'display (list blame-reveal-fringe-side 'blame-reveal-full fringe-face))))))
          (list :string-type 'after-string
                :content content
-               :position-fn (lambda (line) (line-end-position))
+               :position-fn (lambda (_line) (line-end-position))
                :end-pos-fn (lambda (pos) pos))))
 
       ('margin
@@ -645,7 +655,7 @@ Returns a plist containing :string-type, :content, :position-fn, and :end-pos-fn
                                            'face margin-face))))
          (list :string-type 'line-prefix
                :content (propertize " " 'display display-prop)
-               :position-fn (lambda (line) (line-beginning-position))
+               :position-fn (lambda (_line) (line-beginning-position))
                :end-pos-fn (lambda (bol) (1+ bol))))))))
 
 (defun blame-reveal--update-overlay-in-place (overlay start-pos end-pos string-type content)

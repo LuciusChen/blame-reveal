@@ -10,6 +10,16 @@
 (require 'color)
 (require 'blame-reveal-core)
 
+(defvar blame-reveal-color-scheme)
+(defvar blame-reveal-gradient-quality)
+(defvar blame-reveal-old-commit-color)
+(defvar blame-reveal-recent-days-limit)
+(defvar blame-reveal-show-uncommitted-fringe)
+(defvar blame-reveal-uncommitted-color)
+
+(declare-function blame-reveal--ensure-commit-info "blame-reveal-git")
+(declare-function blame-reveal--force-update-header "blame-reveal")
+
 ;;; Color Strategy Protocol
 
 (cl-defstruct (blame-reveal-color-strategy
@@ -387,7 +397,7 @@ Returns a cons cell: (ADJUSTED-DAYS . FINAL-COMMITS)."
       (setq iterations (1+ iterations)))
     (cons days commits-in-range)))
 
-(defun blame-reveal--validate-and-finalize (days sample-size span-days)
+(defun blame-reveal--validate-and-finalize (days _sample-size span-days)
   "Validate and finalize days limit.
 Returns final days (integer)."
   (when (and days
@@ -429,7 +439,7 @@ Returns: integer days limit or nil."
                        (adjusted-days (blame-reveal--adjust-for-minimum-commits
                                        base-days timestamps reference-time
                                        total-commits))
-                       (`(,final-days . ,final-commits)
+                       (`(,final-days . ,_final-commits)
                         (blame-reveal--adjust-for-quality
                          adjusted-days timestamps reference-time))
                        (validated-days (blame-reveal--validate-and-finalize
