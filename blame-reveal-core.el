@@ -16,19 +16,6 @@
 
 ;;; Constants
 
-;; State Machine Constants
-
-
-(defconst blame-reveal--state-idle 'idle)
-(defconst blame-reveal--state-loading 'loading)
-(defconst blame-reveal--state-processing 'processing)
-(defconst blame-reveal--state-rendering 'rendering)
-(defconst blame-reveal--state-error 'error)
-
-(defconst blame-reveal--op-initial 'initial)
-(defconst blame-reveal--op-expansion 'expansion)
-(defconst blame-reveal--op-recursive 'recursive)
-
 (defconst blame-reveal--overlay-types
   '(fringe header sticky-header temp-fringe loading)
   "All overlay types used by blame-reveal.")
@@ -279,7 +266,7 @@ Returns list of (START-LINE COMMIT-HASH BLOCK-LENGTH)."
         (current-commit nil)
         (block-start nil)
         (block-length 0))
-    (dolist (entry blame-data)
+    (cl-dolist (entry blame-data)
       (let ((line (car entry))
             (commit (cdr entry)))
         (if (equal commit current-commit)
@@ -291,7 +278,10 @@ Returns list of (START-LINE COMMIT-HASH BLOCK-LENGTH)."
               (push (list block-start current-commit block-length) blocks)))
           (setq current-commit commit
                 block-start line
-                block-length 1))))
+                block-length 1)
+          ;; Entries are sorted; blocks starting past END-LINE cannot match.
+          (when (and end-line (> line end-line))
+            (cl-return)))))
     (when current-commit
       (when (or (not start-line)
                 (and (>= (+ block-start block-length -1) start-line)
@@ -452,10 +442,13 @@ DOES NOT handle UI elements or application timers."
 
   (blame-reveal--state-reset-internal)
   (setq blame-reveal--state-status 'error)
-  (run-with-timer 0.1 nil
-                  (lambda ()
-                    (when (eq blame-reveal--state-status 'error)
-                      (setq blame-reveal--state-status 'idle)))))
+  (let ((buffer (current-buffer)))
+    (run-with-timer 0.1 nil
+                    (lambda ()
+                      (when (buffer-live-p buffer)
+                        (with-current-buffer buffer
+                          (when (eq blame-reveal--state-status 'error)
+                            (setq blame-reveal--state-status 'idle))))))))
 
 (defun blame-reveal--state-cancel (reason)
   "Cancel current operation for REASON. Caller must clean up UI artifacts."

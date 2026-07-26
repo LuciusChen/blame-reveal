@@ -408,25 +408,10 @@ Returns the new buffer on success, nil on failure."
 If RANGE is (START-LINE . END-LINE), only blame that range.
 REVISION can be a commit hash or `uncommitted' for the working tree.
 Returns (BLAME-DATA . MOVE-METADATA)."
-  (let ((git-root (vc-git-root file)))
-    (when git-root
-      (let ((default-directory git-root)
-            (relative-file (file-relative-name file git-root)))
-        (blame-reveal--with-git-env
-         (with-temp-buffer
-           (let* ((args (blame-reveal--build-blame-command-args
-                         (when range (car range))
-                         (when range (cdr range))
-                         relative-file
-                         revision))
-                  (exit-code (apply #'call-process "git" nil t nil args)))
-             (message "Git command: git %s (exit: %d)" (mapconcat 'identity args " ") exit-code)
-             (when (not (zerop exit-code))
-               (message "Git error output: %s" (buffer-string)))
-             (when (zerop exit-code)
-               (blame-reveal--parse-blame-output
-                (current-buffer)
-                relative-file)))))))))
+  (blame-reveal--call-git-blame-sync (when range (car range))
+                                     (when range (cdr range))
+                                     revision
+                                     file))
 
 (defun blame-reveal--load-blame-sync (revision)
   "Load blame data at REVISION synchronously.

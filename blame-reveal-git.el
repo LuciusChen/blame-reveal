@@ -11,6 +11,12 @@
 
 (defvar blame-reveal-lazy-load-threshold)
 (defvar blame-reveal-async-blame)
+(defvar blame-reveal-mode)
+
+(declare-function blame-reveal--render-visible-region "blame-reveal-ui")
+(declare-function blame-reveal--render-expanded-region "blame-reveal-ui" (start-line end-line))
+(declare-function blame-reveal--update-header "blame-reveal-ui")
+(declare-function blame-reveal--update-recent-commits "blame-reveal-color")
 
 ;;; Git Command Building
 
@@ -93,11 +99,13 @@ Returns the blame-data if successful, nil otherwise."
       ;; Return data for further processing
       blame-data)))
 
-(defun blame-reveal--call-git-blame-sync (start-line end-line)
+(defun blame-reveal--call-git-blame-sync (start-line end-line &optional revision file)
   "Execute git blame synchronously with unified command building.
 START-LINE and END-LINE are optional (nil for full file).
+REVISION optionally overrides the revision to blame.
+FILE defaults to the current buffer's file.
 Returns (BLAME-DATA . MOVE-METADATA) on success, nil on failure."
-  (let* ((file (buffer-file-name))
+  (let* ((file (or file (buffer-file-name)))
          (git-root (and file (vc-git-root file))))
     (when (and file git-root (vc-git-registered file))
       (let ((default-directory git-root)
@@ -107,7 +115,7 @@ Returns (BLAME-DATA . MOVE-METADATA) on success, nil on failure."
                                              process-environment))))
         (with-temp-buffer
           (let ((args (blame-reveal--build-blame-command-args
-                       start-line end-line relative-file)))
+                       start-line end-line relative-file revision)))
             (when (zerop (apply #'call-process "git" nil t nil args))
               (blame-reveal--parse-blame-output (current-buffer) relative-file))))))))
 
@@ -124,6 +132,14 @@ Both should be relative to GIT-ROOT."
   (and file1 file2
        (not (string= (blame-reveal--normalize-path file1 git-root)
                      (blame-reveal--normalize-path file2 git-root)))))
+
+(defun blame-reveal--unquote-git-path (path)
+  "Unquote PATH as C-quoted by git for special characters, if needed."
+  (if (string-prefix-p "\"" path)
+      (condition-case nil
+          (decode-coding-string (car (read-from-string path)) 'utf-8)
+        (error path))
+    path))
 
 (defun blame-reveal--parse-blame-output (output-buffer current-file)
   "Parse git blame porcelain output from OUTPUT-BUFFER.
@@ -167,7 +183,7 @@ Only the `previous' field reliably indicates cross-file move/copy."
          ((looking-at "^previous \\([a-f0-9]+\\) \\(.+\\)$")
           (when current-commit
             (let ((prev-commit (match-string 1))
-                  (prev-file (match-string 2)))
+                  (prev-file (blame-reveal--unquote-git-path (match-string 2))))
               ;; Only record if this is truly a cross-file operation
               (when (blame-reveal--is-cross-file-p prev-file current-file git-root)
                 (puthash current-commit
@@ -187,13 +203,6 @@ Only the `previous' field reliably indicates cross-file move/copy."
     (cons (nreverse blame-data) move-metadata)))
 
 ;;; Synchronous Loading (REFACTORED)
-
-(defun blame-reveal--get-blame-data ()
-  "Get git blame data for current buffer (entire file) synchronously.
-Returns (BLAME-DATA . MOVE-METADATA) where:
-- BLAME-DATA is list of (LINE-NUMBER . COMMIT-HASH)
-- MOVE-METADATA is hash table of commit -> previous info"
-  (blame-reveal--call-git-blame-sync nil nil))
 
 (defun blame-reveal--get-blame-data-range (start-line end-line)
   "Get git blame data for specific line range START-LINE to END-LINE synchronously.
@@ -230,23 +239,6 @@ Returns (BLAME-DATA . MOVE-METADATA) where:
        (blame-reveal--state-error (error-message-string err))
        nil))))
 
-(defun blame-reveal--merge-new-blame-entries (new-data)
-  "Merge NEW-DATA into blame-reveal--blame-data.
-Returns the count of added entries."
-  (let ((existing-lines (make-hash-table :test 'equal))
-        (added-count 0))
-    (dolist (entry blame-reveal--blame-data)
-      (puthash (car entry) t existing-lines))
-    (dolist (entry new-data)
-      (unless (gethash (car entry) existing-lines)
-        (push entry blame-reveal--blame-data)
-        (cl-incf added-count)))
-    (when (> added-count 0)
-      (setq blame-reveal--blame-data
-            (sort blame-reveal--blame-data
-                  (lambda (a b) (< (car a) (car b))))))
-    added-count))
-
 (defun blame-reveal--update-blame-data-range (start-line end-line)
   "Update blame-reveal--blame-data-range to include START-LINE to END-LINE."
   (setq blame-reveal--blame-data-range
@@ -259,8 +251,7 @@ Returns the count of added entries."
   "Finalize blame expansion with START-LINE, END-LINE, ADDED-COUNT.
 SYNC-P indicates whether this is synchronous expansion."
   (blame-reveal--update-blame-data-range start-line end-line)
-  (mapc #'blame-reveal--ensure-commit-info (blame-reveal--get-visible-commits))
-  (blame-reveal--update-recent-commits)
+  (blame-reveal--ensure-visible-commits-loaded)
   (blame-reveal--state-transition 'rendering)
   (blame-reveal--render-expanded-region start-line end-line)
   (let ((current-line (line-number-at-pos)))
@@ -286,7 +277,7 @@ SYNC-P indicates whether this is synchronous expansion."
                 (blame-reveal--state-complete))
             (blame-reveal--state-transition 'processing)
             (blame-reveal--merge-move-copy-metadata move-metadata)
-            (let ((added-count (blame-reveal--merge-new-blame-entries new-data)))
+            (let ((added-count (car (blame-reveal--merge-new-blame-entries-with-commits new-data))))
               (when (> added-count 0)
                 (blame-reveal--finalize-expansion start-line end-line added-count t)))
             (blame-reveal--state-complete)))
@@ -299,38 +290,40 @@ SYNC-P indicates whether this is synchronous expansion."
 (defun blame-reveal--make-async-sentinel (source-buffer temp-buffer success-handler
                                                         &optional error-handler)
   "Create a process sentinel for async blame loading."
-  `(lambda (proc event)
-     (cond
-      ((string-match-p "finished" event)
-       (when (buffer-live-p ,source-buffer)
-         (with-current-buffer ,source-buffer
-           ;; Verify process belongs to current operation
-           (if (not (blame-reveal--state-verify-process proc))
-               (progn
-                 (message "[Async] Ignoring stale process callback (ID mismatch)")
-                 (when (buffer-live-p ,temp-buffer)
-                   (kill-buffer ,temp-buffer)))
-             ;; Verify buffer state hasn't changed
-             (if (not (and blame-reveal-mode
-                           (equal (buffer-file-name)
-                                  (process-get proc 'source-file))
-                           (eq (current-buffer) ,source-buffer)))
-                 (progn
-                   (message "[Async] Ignoring callback: buffer state changed")
-                   (when (buffer-live-p ,temp-buffer)
-                     (kill-buffer ,temp-buffer)))
-               ;; All checks passed, execute handler
-               (funcall ,success-handler ,temp-buffer))))))
-      (t
-       (when (buffer-live-p ,source-buffer)
-         (with-current-buffer ,source-buffer
-           ;; Only handle error if process is still valid
-           (when (blame-reveal--state-verify-process proc)
-             (blame-reveal--state-error (format "Process %s: %s" proc event))
-             ,(when error-handler
-                `(funcall ,error-handler)))))
-       (when (buffer-live-p ,temp-buffer)
-         (kill-buffer ,temp-buffer))))))
+  (lambda (proc event)
+    (cond
+     ((string-match-p "finished" event)
+      (if (not (buffer-live-p source-buffer))
+          (when (buffer-live-p temp-buffer)
+            (kill-buffer temp-buffer))
+        (with-current-buffer source-buffer
+          ;; Verify process belongs to current operation
+          (if (not (blame-reveal--state-verify-process proc))
+              (progn
+                (message "[Async] Ignoring stale process callback (ID mismatch)")
+                (when (buffer-live-p temp-buffer)
+                  (kill-buffer temp-buffer)))
+            ;; Verify buffer state hasn't changed
+            (if (not (and blame-reveal-mode
+                          (equal (buffer-file-name)
+                                 (process-get proc 'source-file))
+                          (eq (current-buffer) source-buffer)))
+                (progn
+                  (message "[Async] Ignoring callback: buffer state changed")
+                  (when (buffer-live-p temp-buffer)
+                    (kill-buffer temp-buffer)))
+              ;; All checks passed, execute handler
+              (funcall success-handler temp-buffer))))))
+     (t
+      (when (buffer-live-p source-buffer)
+        (with-current-buffer source-buffer
+          ;; Only handle error if process is still valid
+          (when (blame-reveal--state-verify-process proc)
+            (blame-reveal--state-error (format "Process %s: %s" proc event))
+            (when error-handler
+              (funcall error-handler)))))
+      (when (buffer-live-p temp-buffer)
+        (kill-buffer temp-buffer))))))
 
 (defun blame-reveal--start-async-blame (start-line end-line success-handler
                                                    &optional error-handler)
@@ -357,23 +350,22 @@ SYNC-P indicates whether this is synchronous expansion."
         :sentinel (blame-reveal--make-async-sentinel
                    source-buffer temp-buffer success-handler error-handler)
         :noquery t)
-       temp-buffer)
-      ;; Store source file for verification
-      (process-put blame-reveal--state-process 'source-file file))))
+       temp-buffer))))
 
 (defun blame-reveal--load-blame-data-async ()
   "Asynchronously load initial blame data."
   (let* ((use-lazy (blame-reveal--should-lazy-load-p))
          (range (when use-lazy (blame-reveal--get-visible-line-range)))
+         (use-lazy-effective (and use-lazy range))
          (start-line (when range (car range)))
          (end-line (when range (cdr range))))
     (when (blame-reveal--state-start 'initial 'async
-                                     (if (and start-line end-line)
+                                     (if use-lazy-effective
                                          (list :start-line start-line
                                                :end-line end-line
                                                :use-lazy t)
                                        (list :use-lazy nil)))
-      (if use-lazy
+      (if use-lazy-effective
           (if blame-reveal--detect-moves
               (message "Loading git blame with M/C detection: lines %d-%d..." start-line end-line)
             (message "Loading git blame (async, lazy): lines %d-%d..." start-line end-line))
@@ -471,8 +463,9 @@ Returns t on success, nil on failure."
                       (blame-reveal--merge-new-blame-entries-with-commits new-data)))
           (when (> added-count 0)
             (blame-reveal--update-blame-data-range start-line end-line)
-            (maphash (lambda (commit _) (blame-reveal--ensure-commit-info commit))
-                     new-commits)
+            (let (commits)
+              (maphash (lambda (commit _) (push commit commits)) new-commits)
+              (blame-reveal--load-commits-info-missing commits))
             (blame-reveal--update-recent-commits)
             (blame-reveal--state-transition 'rendering)
             (blame-reveal--render-expanded-region start-line end-line)
@@ -593,17 +586,23 @@ ENTRY is (HASH . INFO) from batch results."
     (when timestamp
       (blame-reveal--update-timestamp-range timestamp))))
 
+(defun blame-reveal--load-commits-info-missing (commits)
+  "Batch load info for COMMITS lacking cached info.
+Returns the batch results, or nil if nothing was missing."
+  (let ((missing-commits
+         (cl-remove-if (lambda (h)
+                         (or (blame-reveal--is-uncommitted-p h)
+                             (gethash h blame-reveal--commit-info)))
+                       commits)))
+    (when-let* ((batch-results (and missing-commits
+                                    (blame-reveal--get-commits-info-batch missing-commits))))
+      (mapc #'blame-reveal--store-commit-info-entry batch-results)
+      batch-results)))
+
 (defun blame-reveal--ensure-visible-commits-loaded ()
   "Ensure commit info is loaded for all visible commits (Optimized Batch Version)."
   (when-let* ((visible-commits (blame-reveal--get-visible-commits)))
-    (let ((missing-commits
-           (cl-remove-if (lambda (h)
-                           (or (blame-reveal--is-uncommitted-p h)
-                               (gethash h blame-reveal--commit-info)))
-                         visible-commits)))
-      (when-let* ((batch-results (and missing-commits
-                                      (blame-reveal--get-commits-info-batch missing-commits))))
-        (mapc #'blame-reveal--store-commit-info-entry batch-results))
+    (when (blame-reveal--load-commits-info-missing visible-commits)
       (blame-reveal--update-recent-commits))))
 
 (defun blame-reveal--load-commits-incrementally ()
@@ -635,8 +634,9 @@ ENTRY is (HASH . INFO) from batch results."
         (when (or (< start-line current-start)
                   (> end-line current-end))
           (when (not (blame-reveal--state-is-busy-p))
-            (let ((new-start (min start-line current-start))
-                  (new-end (max end-line current-end)))
+            ;; Request only the missing delta; the loaded range stays contiguous.
+            (let ((new-start (if (< start-line current-start) start-line (1+ current-end)))
+                  (new-end (if (> end-line current-end) end-line (1- current-start))))
               (if (blame-reveal--should-use-async-p)
                   (blame-reveal--expand-blame-data-async new-start new-end)
                 (blame-reveal--expand-blame-data-sync new-start new-end)))))))))

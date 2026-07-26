@@ -750,5 +750,72 @@
         (should (string-match-p "Error in blame at revision"
                                 (car messages)))))))
 
+(ert-deftest blame-reveal-find-block-boundaries-range-keeps-spanning-length ()
+  "Range filtering must keep the true length of blocks spanning END-LINE."
+  (let ((data '((1 . "a") (2 . "a") (3 . "a") (4 . "b") (5 . "b") (6 . "c"))))
+    (should (equal (blame-reveal--find-block-boundaries data 1 2)
+                   '((1 "a" 3))))
+    (should (equal (blame-reveal--find-block-boundaries data 3 4)
+                   '((1 "a" 3) (4 "b" 2))))
+    (should (equal (blame-reveal--find-block-boundaries data 6 6)
+                   '((6 "c" 1))))
+    (should (equal (blame-reveal--find-block-boundaries data)
+                   '((1 "a" 3) (4 "b" 2) (6 "c" 1))))))
+
+(ert-deftest blame-reveal-ensure-range-loaded-requests-only-missing-delta ()
+  "Range expansion should blame only the unloaded gap, not the union."
+  (with-temp-buffer
+    (setq blame-reveal--blame-data-range (cons 100 200))
+    (setq blame-reveal--state-status 'idle)
+    (let (calls)
+      (cl-letf (((symbol-function 'blame-reveal--should-use-async-p)
+                 (lambda () nil))
+                ((symbol-function 'blame-reveal--expand-blame-data-sync)
+                 (lambda (start end) (push (cons start end) calls))))
+        (blame-reveal--ensure-range-loaded 150 260)
+        (blame-reveal--ensure-range-loaded 40 180)
+        (blame-reveal--ensure-range-loaded 50 250)
+        (blame-reveal--ensure-range-loaded 120 180))
+      (should (equal (nreverse calls)
+                     '((201 . 260) (40 . 99) (50 . 250)))))))
+
+(ert-deftest blame-reveal-state-error-recovers-idle-in-original-buffer ()
+  "Error state must reset to idle in the erroring buffer, not the current one."
+  (let ((buffer-a (generate-new-buffer "blame-reveal-test-a"))
+        (buffer-b (generate-new-buffer "blame-reveal-test-b")))
+    (unwind-protect
+        (progn
+          (cl-letf (((symbol-function 'blame-reveal--clear-header) #'ignore)
+                    ((symbol-function 'blame-reveal--stop-loading-animation) #'ignore)
+                    ((symbol-function 'message) #'ignore))
+            (with-current-buffer buffer-a
+              (blame-reveal--state-error "test error")))
+          (with-current-buffer buffer-b
+            (sit-for 0.3))
+          (should (eq (buffer-local-value 'blame-reveal--state-status buffer-a)
+                      'idle)))
+      (kill-buffer buffer-a)
+      (kill-buffer buffer-b))))
+
+(ert-deftest blame-reveal-unquote-git-path-decodes-quoted-filenames ()
+  "Quoted porcelain paths must be unquoted before cross-file comparison."
+  (should (equal (blame-reveal--unquote-git-path
+                  "\"\\346\\226\\207\\344\\273\\266.el\"")
+                 "文件.el"))
+  (should (equal (blame-reveal--unquote-git-path "dir with space/a.el")
+                 "dir with space/a.el"))
+  (should (equal (blame-reveal--unquote-git-path "\"a\\\"b.el\"") "a\"b.el"))
+  (should (equal (blame-reveal--unquote-git-path "\"broken") "\"broken")))
+
+(ert-deftest blame-reveal-async-sentinel-cleans-temp-buffer-when-source-dead ()
+  "Sentinel must kill the temp buffer when the source buffer was killed."
+  (let ((source-buffer (generate-new-buffer "blame-reveal-test-source"))
+        (temp-buffer (generate-new-buffer " *blame-async-test*")))
+    (kill-buffer source-buffer)
+    (funcall (blame-reveal--make-async-sentinel
+              source-buffer temp-buffer #'ignore)
+             nil "finished\n")
+    (should-not (buffer-live-p temp-buffer))))
+
 (provide 'blame-reveal-test)
 ;;; blame-reveal-test.el ends here

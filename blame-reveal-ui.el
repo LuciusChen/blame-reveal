@@ -620,7 +620,8 @@ Only recent commits are permanently visible."
 (defun blame-reveal--find-block-info-at-line (line-num)
   "Find block metadata containing LINE-NUM.
 Return (COMMIT-HASH BLOCK-START BLOCK-END), or nil if not found."
-  (cl-loop for block in (blame-reveal--find-block-boundaries blame-reveal--blame-data)
+  (cl-loop for block in (blame-reveal--find-block-boundaries
+                         blame-reveal--blame-data line-num line-num)
            for block-start = (nth 0 block)
            for block-commit = (nth 1 block)
            for block-length = (nth 2 block)
@@ -642,7 +643,7 @@ Returns (COMMIT-HASH . BLOCK-START) or nil."
            for commit = (overlay-get ov 'blame-reveal-commit)
            when commit
            return (cl-loop for block in (blame-reveal--find-block-boundaries
-                                         blame-reveal--blame-data)
+                                         blame-reveal--blame-data line-num line-num)
                            for block-start = (nth 0 block)
                            for block-commit = (nth 1 block)
                            for block-length = (nth 2 block)
