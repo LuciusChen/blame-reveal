@@ -621,7 +621,9 @@ line-based and pixel-based scrolling state."
            (blame-reveal--get-effective-header-style))))
 
 (defun blame-reveal--render-style-data (commit-hash style color no-fringe &optional sticky-indicator)
-  "Calculate overlay properties for STYLE.
+  "Calculate overlay properties for COMMIT-HASH in STYLE.
+COLOR is the fringe color.  NO-FRINGE suppresses fringe rendering.
+STICKY-INDICATOR is prepended when non-nil.
 Return a plist with `:string-type', `:content', `:position-fn',
 and `:end-pos-fn'."
   (let* ((display (blame-reveal--get-formatted-display commit-hash style))

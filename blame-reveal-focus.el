@@ -4,7 +4,7 @@
 
 ;; Author: Lucius Chen
 ;; Version: 0.1
-;; Package-Requires: ((emacs "27.1") (blame-reveal "0.5"))
+;; Package-Requires: ((emacs "28.1") (blame-reveal "0.5"))
 ;; Keywords: git, vc, convenience
 
 ;;; Commentary:
@@ -429,7 +429,7 @@ When exiting focus mode:
 - Normal blame display is restored"
   (interactive)
   (unless blame-reveal-mode
-    (user-error "blame-reveal-mode is not enabled"))
+    (user-error "Blame-reveal mode is not enabled"))
 
   (if (blame-reveal-focus--active-p)
       ;; Already in focus mode - toggle off

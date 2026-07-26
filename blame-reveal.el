@@ -1,11 +1,12 @@
 ;;; blame-reveal.el --- Git blame visualization in fringe -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2024 Lucius Chen
-;; Author: Lucius Chen
+;; Author: Lucius Chen <chenyh572@gmail.com>
+;; Maintainer: Lucius Chen <chenyh572@gmail.com>
 ;; Version: 0.5
-;; Package-Requires: ((emacs "27.1"))
+;; Package-Requires: ((emacs "28.1") (transient "0.4.0"))
 ;; Keywords: git, vc, convenience
-;; URL: https://github.com/lucius-chen/blame-reveal
+;; URL: https://github.com/LuciusChen/blame-reveal
 
 ;;; Commentary:
 ;; Display git blame information in the fringe with adaptive color gradients.
@@ -33,13 +34,29 @@
 ;;   (setq blame-reveal-header-style 'inline)         ; Header format
 ;;   (setq blame-reveal-color-scheme '(:hue 120 ...)) ; Color theme
 ;;
-;; See full documentation: https://github.com/lucius-chen/blame-reveal
+;; See full documentation: https://github.com/LuciusChen/blame-reveal
 
 ;;; Code:
 
 (require 'ansi-color)
 (require 'vc-git)
 (require 'cl-lib)
+
+(declare-function ansi-color-apply-on-region "ansi-color")
+(declare-function blame-reveal-menu "blame-reveal-transient")
+(declare-function blame-reveal-blame-recursively "blame-reveal-recursive")
+(declare-function blame-reveal-blame-back "blame-reveal-recursive")
+(declare-function blame-reveal-blame-at-revision "blame-reveal-recursive")
+(declare-function blame-reveal-reset-to-head "blame-reveal-recursive")
+(declare-function blame-reveal-focus-commit "blame-reveal-focus")
+(declare-function blame-reveal-next-focus-block "blame-reveal-focus")
+(declare-function blame-reveal-prev-focus-block "blame-reveal-focus")
+(declare-function magit-show-commit "magit")
+(declare-function magit-get-mode-buffer "magit-mode")
+(declare-function magit-log-buffer-file "magit-log")
+
+(defvar blame-reveal-mode)
+(defvar blame-reveal-global-mode)
 
 ;; Load all modules
 (require 'blame-reveal-core)
@@ -105,15 +122,15 @@
     (define-key map (kbd "n") #'blame-reveal-next-focus-block)
     (define-key map (kbd "N") #'blame-reveal-prev-focus-block)
     map)
-  "Prefix keymap for `blame-reveal-mode' commands under `C-c l'.")
+  "Prefix keymap for `blame-reveal-mode' commands.")
 
 (defvar blame-reveal-mode-map
   (let ((map (make-sparse-keymap)))
-    ;; Prefix bindings: C-c l <key>
-    (define-key map (kbd "C-c l") blame-reveal-prefix-map)
+    ;; Prefix bindings: C-c C-l <key>
+    (define-key map (kbd "C-c C-l") blame-reveal-prefix-map)
     map)
   "Keymap for `blame-reveal-mode'.
-Commands are available under the `C-c l` prefix.")
+Commands are available under `blame-reveal-prefix-map'.")
 
 ;;; Timer Variables
 
@@ -141,8 +158,7 @@ This is an implementation detail and should not be customized by users.")
 (defgroup blame-reveal nil
   "Show git blame in fringe with colors.
 
-Quick start:
-  M-x blame-reveal-mode
+Enable the mode with `blame-reveal-mode'.
 
 Common customizations:
   - `blame-reveal-color-scheme': Change color scheme
@@ -151,7 +167,7 @@ Common customizations:
   - `blame-reveal-use-magit': Use magit for commit details
   - `blame-reveal-lazy-load-threshold': Lazy loading threshold
 
-See all options: M-x customize-group RET blame-reveal"
+See all options with `customize-group'."
   :group 'vc
   :prefix "blame-reveal-")
 
@@ -304,15 +320,15 @@ while the fringe shows visual age indicators."
          (when (and (boundp 'blame-reveal-mode) blame-reveal-mode)
            (dolist (buffer (buffer-list))
              (with-current-buffer buffer
-                 (when blame-reveal-mode
-                   ;; Restore margins when switching away from margin style
-                   (when (and (not (eq value 'margin))
-                              (blame-reveal--is-margin-style-p))
-                     (blame-reveal--restore-window-margins))
-                   ;; Setup margins when switching to margin style
-                   (when (and (eq value 'margin)
-                              (not (blame-reveal--is-margin-style-p)))
-                     (blame-reveal--ensure-window-margins))
+               (when blame-reveal-mode
+                 ;; Restore margins when switching away from margin style.
+                 (when (and (not (eq value 'margin))
+                            (blame-reveal--is-margin-style-p))
+                   (blame-reveal--restore-window-margins))
+                 ;; Setup margins when switching to margin style.
+                 (when (and (eq value 'margin)
+                            (not (blame-reveal--is-margin-style-p)))
+                   (blame-reveal--ensure-window-margins))
                  ;; Refresh display using No-Flicker system
                  (blame-reveal--clear-header)
                  (setq blame-reveal--last-rendered-commit nil)
@@ -320,7 +336,7 @@ while the fringe shows visual age indicators."
   :group 'blame-reveal)
 
 (defcustom blame-reveal-margin-side 'left
-  "Which margin to use when =blame-reveal-header-style' is =margin'.
+  "Which margin to use when `blame-reveal-header-style' is `margin'.
 
 Left margin:
   - More visible but takes space from code area
@@ -361,8 +377,8 @@ across projects with different commit frequencies.
 
 Values:
   `auto' - Automatically calculate based on commit density and
-           gradient quality. Adapts to both normal and recursive
-           blame modes. (Recommended)
+           gradient quality.  Adapts to both normal and recursive
+           blame modes.  (Recommended)
 
   number - Fixed days (e.g., 30, 90, 180, 365)
            Shows commits within this many days from reference point.
@@ -412,7 +428,7 @@ Only used when `blame-reveal-recent-days-limit' is `auto'.
 For fixed days limit, this setting is ignored.
 
 Color distinction is measured by the lightness/saturation step between
-consecutive commits in the gradient. Smaller steps mean colors are
+consecutive commits in the gradient.  Smaller steps mean colors are
 harder to distinguish visually."
   :type '(choice (const :tag "Strict (best distinction)" strict)
                  (const :tag "Auto (balanced)" auto)
@@ -501,7 +517,7 @@ Can be:
 (defcustom blame-reveal-old-commit-color nil
   "Color for old commits (not in top N or beyond time limit).
 If nil, use an automatic gray based on theme.
-Dark theme uses #4a4a4a. Light theme uses #d0d0d0.
+Dark theme uses #4a4a4a.  Light theme uses #d0d0d0.
 Set to a color string like \"#888888\" to use a fixed color."
   :type '(choice (const :tag "Auto (theme-based gray)" nil)
                  (color :tag "Fixed color"))
@@ -561,7 +577,7 @@ Example schemes:
 (defcustom blame-reveal-temp-overlay-delay 0.05
   "Delay in seconds before rendering temp overlays for old commits.
 Lower values (e.g., 0.02) make overlays appear faster but may cause lag
-when moving cursor quickly. Higher values (e.g., 0.1) reduce lag but
+when moving cursor quickly.  Higher values (e.g., 0.1) reduce lag but
 overlays appear with more delay."
   :type 'number
   :group 'blame-reveal)
@@ -717,7 +733,7 @@ Returns t if valid, otherwise prints message and returns nil."
   (advice-remove 'transient-setup #'blame-reveal--protect-during-transient-setup))
 
 (defun blame-reveal--protect-during-transient-setup (orig-fun &rest args)
-  "Prevent header deletion during transient-setup.
+  "Call ORIG-FUN with ARGS while protecting headers during transient setup.
 Sets a buffer-local flag during transient-setup to prevent
 blame-reveal--update-header from interfering."
   (let ((current-buf (current-buffer)))
@@ -831,7 +847,7 @@ Uses magit if `blame-reveal-use-magit' is configured to do so."
   "Show detailed information about commit at current line in a popup buffer."
   (interactive)
   (unless blame-reveal-mode
-    (user-error "blame-reveal-mode is not enabled"))
+    (user-error "Blame-reveal mode is not enabled"))
   (let* ((current-block (blame-reveal--get-current-block))
          (commit-hash (car current-block)))
     (unless commit-hash
@@ -1166,7 +1182,7 @@ Handles Hooks, Timers, Overlays, and State."
   "Toggle automatic blame-reveal for all git-tracked files.
 
 When enabled, blame-reveal-mode will be automatically activated
-for any git-tracked file you open. This is convenient when working
+for any git-tracked file you open.  This is convenient when working
 on a project and you want blame information always available.
 
 When disabled, you need to manually enable blame-reveal-mode for
