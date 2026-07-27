@@ -21,7 +21,7 @@
 (require 'blame-reveal-transient)
 
 (ert-deftest blame-reveal-mode-map-keeps-focus-navigation-under-prefix ()
-  "Focus commands should stay under the `C-c l' prefix."
+  "Focus commands should stay under the `C-c C-l' prefix."
   (should (eq (lookup-key blame-reveal-prefix-map (kbd "f"))
               #'blame-reveal-focus-commit))
   (should (eq (lookup-key blame-reveal-prefix-map (kbd "n"))
@@ -457,7 +457,7 @@
         (should (= render-calls 1))
         (should (= clear-header-state-calls 1))
         (should (= header-calls 0))
-        (should (string-match-p "C-c l f" (car messages)))
+        (should (string-match-p "C-c C-l f" (car messages)))
 
         (setq cleared nil
               messages nil)
@@ -763,7 +763,7 @@
                    '((1 "a" 3) (4 "b" 2) (6 "c" 1))))))
 
 (ert-deftest blame-reveal-ensure-range-loaded-requests-only-missing-delta ()
-  "Range expansion should blame only the unloaded gap, not the union."
+  "Range expansion should blame only unloaded gaps, not their union."
   (with-temp-buffer
     (setq blame-reveal--blame-data-range (cons 100 200))
     (setq blame-reveal--state-status 'idle)
@@ -777,7 +777,42 @@
         (blame-reveal--ensure-range-loaded 50 250)
         (blame-reveal--ensure-range-loaded 120 180))
       (should (equal (nreverse calls)
-                     '((201 . 260) (40 . 99) (50 . 250)))))))
+                     '((201 . 260) (40 . 99) (50 . 99) (201 . 250)))))))
+
+(ert-deftest blame-reveal-missing-ranges-splits-two-sided-expansion ()
+  "Two-sided expansion must not include the already loaded middle."
+  (with-temp-buffer
+    (setq blame-reveal--blame-data-range (cons 100 200))
+    (should (equal (blame-reveal--missing-blame-ranges 50 250)
+                   '((50 . 99) (201 . 250))))
+    (should (equal (blame-reveal--missing-blame-ranges 150 260)
+                   '((201 . 260))))
+    (should (equal (blame-reveal--missing-blame-ranges 40 180)
+                   '((40 . 99))))
+    (should-not (blame-reveal--missing-blame-ranges 120 180))))
+
+(ert-deftest blame-reveal-async-expansion-continues-with-remaining-ranges ()
+  "Async expansion should start the next missing range after success."
+  (with-temp-buffer
+    (let ((blame-reveal--state-status 'loading)
+          (temp-buffer (generate-new-buffer " *blame-async-chain-test*"))
+          next-ranges)
+      (unwind-protect
+          (cl-letf (((symbol-function 'blame-reveal--state-transition)
+                     (lambda (status)
+                       (setq blame-reveal--state-status status)))
+                    ((symbol-function 'blame-reveal--process-expansion-result)
+                     (lambda (_temp _start _end)
+                       (setq blame-reveal--state-status 'idle)
+                       t))
+                    ((symbol-function 'blame-reveal--expand-blame-ranges-async)
+                     (lambda (ranges)
+                       (setq next-ranges ranges))))
+            (blame-reveal--handle-expansion-complete
+             temp-buffer 50 99 '((201 . 250)))
+            (should (equal next-ranges '((201 . 250)))))
+        (when (buffer-live-p temp-buffer)
+          (kill-buffer temp-buffer))))))
 
 (ert-deftest blame-reveal-state-error-recovers-idle-in-original-buffer ()
   "Error state must reset to idle in the erroring buffer, not the current one."

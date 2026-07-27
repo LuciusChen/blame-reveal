@@ -22,7 +22,8 @@ choices drifted away from normal Emacs expectations.
 
 ## Decisions
 
-- Keep command entry points explicit: `M-x` and `C-c l`.
+- Keep command entry points explicit: `M-x` and the mode's prefix map
+  (currently `C-c C-l`).
 - Treat `blame-reveal-mode` as a normal minor mode, not an emulation layer.
 - Install shared integrations only while at least one blame buffer is active.
 - Use `define-globalized-minor-mode` for global enablement.

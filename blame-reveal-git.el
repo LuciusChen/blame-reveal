@@ -415,8 +415,10 @@ SYNC-P indicates whether this is synchronous expansion."
       (when (buffer-live-p temp-buffer)
         (kill-buffer temp-buffer)))))
 
-(defun blame-reveal--expand-blame-data-async (start-line end-line)
-  "Asynchronously expand blame data to include START-LINE to END-LINE."
+(defun blame-reveal--expand-blame-data-async (start-line end-line
+                                                         &optional remaining-ranges)
+  "Asynchronously expand blame data to include START-LINE to END-LINE.
+After a successful expansion, load REMAINING-RANGES sequentially."
   (when (blame-reveal--state-start 'expansion 'async
                                    (list :start-line start-line
                                          :end-line end-line))
@@ -424,7 +426,14 @@ SYNC-P indicates whether this is synchronous expansion."
      start-line
      end-line
      (lambda (temp-buffer)
-       (blame-reveal--handle-expansion-complete temp-buffer start-line end-line)))))
+       (blame-reveal--handle-expansion-complete
+        temp-buffer start-line end-line remaining-ranges)))))
+
+(defun blame-reveal--expand-blame-ranges-async (ranges)
+  "Asynchronously expand missing blame RANGES in sequence."
+  (when-let* ((range (car ranges)))
+    (blame-reveal--expand-blame-data-async
+     (car range) (cdr range) (cdr ranges))))
 
 (defun blame-reveal--merge-new-blame-entries-with-commits (new-data)
   "Merge NEW-DATA into blame-reveal--blame-data, tracking new commits.
@@ -478,8 +487,10 @@ Returns t on success, nil on failure."
         (blame-reveal--state-complete)
         t))))
 
-(defun blame-reveal--handle-expansion-complete (temp-buffer start-line end-line)
-  "Handle completion of async blame expansion from TEMP-BUFFER."
+(defun blame-reveal--handle-expansion-complete (temp-buffer start-line end-line
+                                                            &optional remaining-ranges)
+  "Handle completion of async blame expansion from TEMP-BUFFER.
+Load REMAINING-RANGES sequentially after this range succeeds."
   (if (not (eq blame-reveal--state-status 'loading))
       (progn
         (message "[State] Unexpected complete in state %s" blame-reveal--state-status)
@@ -490,7 +501,9 @@ Returns t on success, nil on failure."
           (condition-case err
               (progn
                 (blame-reveal--state-transition 'processing)
-                (blame-reveal--process-expansion-result temp-buffer start-line end-line))
+                (when (blame-reveal--process-expansion-result
+                       temp-buffer start-line end-line)
+                  (blame-reveal--expand-blame-ranges-async remaining-ranges)))
             (error
              (blame-reveal--state-error (format "Expansion error: %s" (error-message-string err))))))
       (when (buffer-live-p temp-buffer)
@@ -625,21 +638,29 @@ Returns the batch results, or nil if nothing was missing."
       (and (>= start-line current-start)
            (<= end-line current-end)))))
 
+(defun blame-reveal--missing-blame-ranges (start-line end-line)
+  "Return unloaded subranges needed to cover START-LINE through END-LINE.
+The result contains zero, one, or two non-overlapping cons cells."
+  (when blame-reveal--blame-data-range
+    (let ((current-start (car blame-reveal--blame-data-range))
+          (current-end (cdr blame-reveal--blame-data-range))
+          ranges)
+      (when (< start-line current-start)
+        (push (cons start-line (1- current-start)) ranges))
+      (when (> end-line current-end)
+        (push (cons (1+ current-end) end-line) ranges))
+      (nreverse ranges))))
+
 (defun blame-reveal--ensure-range-loaded (start-line end-line)
   "Ensure blame data is loaded for range START-LINE to END-LINE."
   (unless (blame-reveal--is-range-loaded-p start-line end-line)
-    (when blame-reveal--blame-data-range
-      (let ((current-start (car blame-reveal--blame-data-range))
-            (current-end (cdr blame-reveal--blame-data-range)))
-        (when (or (< start-line current-start)
-                  (> end-line current-end))
-          (when (not (blame-reveal--state-is-busy-p))
-            ;; Request only the missing delta; the loaded range stays contiguous.
-            (let ((new-start (if (< start-line current-start) start-line (1+ current-end)))
-                  (new-end (if (> end-line current-end) end-line (1- current-start))))
-              (if (blame-reveal--should-use-async-p)
-                  (blame-reveal--expand-blame-data-async new-start new-end)
-                (blame-reveal--expand-blame-data-sync new-start new-end)))))))))
+    (when-let* ((ranges (blame-reveal--missing-blame-ranges start-line end-line)))
+      (unless (blame-reveal--state-is-busy-p)
+        (if (blame-reveal--should-use-async-p)
+            (blame-reveal--expand-blame-ranges-async ranges)
+          (dolist (range ranges)
+            (blame-reveal--expand-blame-data-sync
+             (car range) (cdr range))))))))
 
 (defun blame-reveal--should-use-async-p ()
   "Determine if async loading should be used based on configuration."

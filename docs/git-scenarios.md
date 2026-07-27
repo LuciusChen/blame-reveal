@@ -281,7 +281,9 @@ sequenceDiagram
 The expansion request covers only the delta between the loaded range and
 the visible range (`blame-reveal--ensure-range-loaded`), so scrolling never
 re-blames lines that are already loaded and the loaded range stays
-contiguous. Merging is still idempotent on top of that:
+contiguous. If the visible range expands past both ends at once, the two
+missing gaps are loaded sequentially so the already-loaded middle is still
+skipped. Merging is still idempotent on top of that:
 `blame-reveal--merge-new-blame-entries-with-commits` hashes the
 already-known line numbers and only inserts genuinely new lines, so
 overlapping requests cannot duplicate entries. If the state machine is
@@ -308,9 +310,15 @@ flowchart TD
 
     D --> G["push current state<br/>onto blame stack"]
     F --> G
-    G --> H["git show TARGET:FILE<br/>into a read-only buffer<br/>(major mode auto-detected)"]
-    H --> I["git blame --porcelain TARGET -- FILE<br/>(full file, sync)"]
-    I --> J["swap in historical blame data,<br/>recolor, re-render"]
+    G --> H{"cross-file target?"}
+    H -- no --> I["git blame --porcelain TARGET -- FILE<br/>(full file, sync or async)"]
+    H -- yes --> M{"previous file exists<br/>in working tree?"}
+    M -- yes --> N["visit file, enable mode,<br/>blame it at TARGET"]
+    M -- no --> O{"user chooses to view<br/>historical file?"}
+    O -- yes --> P["git show TARGET:FILE<br/>into a read-only buffer<br/>(no blame state attached)"]
+    O -- no --> Q["stay at current location"]
+    N --> J["swap in historical blame data,<br/>recolor, re-render"]
+    I --> J
     I -- "no data / file absent" --> K["git cat-file -e TARGET:FILE<br/>to classify the error"]
     K --> L["restore previous state,<br/>hint: enable -M -C -C<br/>to trace moves"]
 ```

@@ -43,7 +43,7 @@
 ## Interaction Model
 
 - The package is a normal minor mode, not a modal editor layer.
-- Default command entry points are `M-x` and `C-c l`.
+- Default command entry points are `M-x` and `C-c C-l`.
 - Transient is a convenience UI, not the only way to access functionality.
 
 ## Risk Areas

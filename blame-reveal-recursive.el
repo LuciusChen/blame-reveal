@@ -248,14 +248,14 @@ Restores previous state and provides context-aware error messages."
              (format "File doesn't exist at %s" (substring base-commit 0 8)))
             (if blame-reveal--detect-moves
                 (message "File doesn't exist at commit %s" (substring base-commit 0 8))
-              (message "File doesn't exist at commit %s. Tip: use C-c l m, then M, to enable move/copy detection"
+              (message "File doesn't exist at commit %s. Tip: use C-c C-l m, then M, to enable move/copy detection"
                        (substring base-commit 0 8))))
            ;; Case 3: Other errors
            (t
             (blame-reveal--state-error (format "No blame data at %s" revision))
             (if blame-reveal--detect-moves
                 (message "No blame data at revision %s" revision)
-              (message "No blame data at revision %s. Tip: use C-c l m, then M, to enable move/copy detection"
+              (message "No blame data at revision %s. Tip: use C-c C-l m, then M, to enable move/copy detection"
                        revision))))
         ;; Ensure state is reset in all cases
         (run-with-timer 0.2 nil
@@ -548,7 +548,7 @@ Returns non-nil if action was executed, nil if stopped/cancelled."
        (if blame-reveal--detect-moves
            (message "%s" message-text)
          ;; Add tip about M/C detection when not enabled
-         (message "%s. Tip: Try C-c l m, then M, to enable move/copy detection and trace file origin"
+         (message "%s. Tip: Try C-c C-l m, then M, to enable move/copy detection and trace file origin"
                   message-text))
        nil)
 

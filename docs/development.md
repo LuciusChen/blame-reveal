@@ -10,7 +10,7 @@ results do not depend on your interactive init file.
 
 ## Repository Conventions
 
-- Keep user-facing commands behind `M-x` or the `C-c l` prefix.
+- Keep user-facing commands behind `M-x` or the `C-c C-l` prefix.
 - Do not add bare single-key bindings to `blame-reveal-mode`.
 - Keep optional modules optional. `blame-reveal-focus`, `-recursive`, and
   `-transient` must still be loadable independently.
@@ -34,8 +34,8 @@ The current regression tests live in `test/blame-reveal-test.el`.
 For user-visible changes, test at least:
 
 1. `M-x blame-reveal-mode` in a tracked file.
-2. `C-c l f`, `C-c l n`, and `C-c l N` if focus mode is loaded.
-3. `C-c l m` if transient support is loaded.
+2. `C-c C-l f`, `C-c C-l n`, and `C-c C-l N` if focus mode is loaded.
+3. `C-c C-l m` if transient support is loaded.
 4. `M-x blame-reveal-global-mode` across multiple file buffers.
 5. A large tracked file to confirm scrolling remains responsive.
 

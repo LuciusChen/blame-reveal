@@ -265,7 +265,7 @@ Reuses `blame-reveal--create-fringe-overlay' from overlay module."
   (let ((block-count (length blame-reveal--focus-block-cache))
         (line-count (blame-reveal-focus--count-focused-lines))
         (commit-info (gethash commit-hash blame-reveal--commit-info)))
-    (message "Focus mode: %s (%d blocks, %d lines) - Use C-c l f to exit, C-c l n/C-c l N to navigate"
+    (message "Focus mode: %s (%d blocks, %d lines) - Use C-c C-l f to exit, C-c C-l n/C-c C-l N to navigate"
              (if commit-info
                  (format "%s - %s"
                          (substring commit-hash 0 7)
@@ -340,7 +340,7 @@ Returns block (START-LINE COMMIT-HASH LENGTH) or nil."
 When BACKWARD is non-nil, move to the previous block instead.
 WRAP-MESSAGE is shown when navigation wraps around."
   (unless (blame-reveal-focus--active-p)
-    (user-error "Focus mode is not active. Use C-c l f to enter focus mode"))
+    (user-error "Focus mode is not active. Use C-c C-l f to enter focus mode"))
   (let* ((candidate (blame-reveal-focus--find-next-block backward))
          (wrap-target (if backward
                           (car (last blame-reveal--focus-block-cache))
@@ -423,7 +423,7 @@ When entering focus mode:
 - Fringe indicators only show for the focused commit
 - A persistent focus badge stays visible in the header line
 - Regular block and sticky headers are hidden
-- Use `C-c l n` and `C-c l N` to navigate between blocks
+- Use `C-c C-l n` and `C-c C-l N` to navigate between blocks
 
 When exiting focus mode:
 - Normal blame display is restored"

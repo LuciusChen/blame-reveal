@@ -25,7 +25,7 @@ leave the current buffer or switch into a separate blame view.
 ## Product Goals
 
 - Emacs-native interaction model: commands live behind explicit entry points,
-  primarily `M-x` and the `C-c l` prefix.
+  primarily `M-x` and the `C-c C-l` prefix.
 - Context over noise: prioritize recent and visible blame information instead of
   rendering every commit equally.
 - Predictable performance: prefer viewport-local rendering, caching, and async
