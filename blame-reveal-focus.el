@@ -27,9 +27,9 @@
 ;; - Reuses existing block boundary detection (blame-reveal-core.el)
 ;;
 ;; Usage:
-;;   M-x blame-reveal-focus-commit  (or press 'F' in blame-reveal-mode)
-;;   M-x blame-reveal-next-focus-block (or press 'n' in focus mode)
-;;   M-x blame-reveal-prev-focus-block (or press 'N' in focus mode)
+;;   M-x blame-reveal-focus-commit (or C-c C-l f in blame-reveal-mode)
+;;   M-x blame-reveal-next-focus-block (or C-c C-l n in focus mode)
+;;   M-x blame-reveal-prev-focus-block (or C-c C-l N in focus mode)
 
 ;;; Code:
 
@@ -176,7 +176,7 @@ Reuses `blame-reveal--create-fringe-overlay' from overlay module."
   (let ((block-count (length blame-reveal--focus-block-cache))
         (line-count (blame-reveal-focus--count-focused-lines))
         (commit-info (gethash commit-hash blame-reveal--commit-info)))
-    (message "Focus mode: %s (%d blocks, %d lines) - Press 'F' to exit, 'n/N' to navigate"
+    (message "Focus mode: %s (%d blocks, %d lines) - Use C-c C-l f to exit, C-c C-l n/C-c C-l N to navigate"
              (if commit-info
                  (format "%s - %s"
                          (substring commit-hash 0 7)
@@ -328,7 +328,7 @@ When entering focus mode:
 - All lines belonging to the current commit are highlighted
 - Fringe indicators only show for the focused commit
 - Header and sticky header always display focused commit info
-- Use `n' and `N' to navigate between blocks
+- Use `blame-reveal-prefix-map' to navigate between blocks
 
 When exiting focus mode:
 - Normal blame display is restored"
@@ -356,7 +356,7 @@ In focus mode, this navigates to the next occurrence of lines
 modified by the locked commit."
   (interactive)
   (unless (blame-reveal-focus--active-p)
-    (user-error "Focus mode is not active. Press F to enter focus mode."))
+    (user-error "Focus mode is not active; use C-c C-l f to enter focus mode"))
 
   (let ((next-block (blame-reveal-focus--find-next-block)))
     (if next-block
@@ -377,7 +377,7 @@ In focus mode, this navigates to the previous occurrence of lines
 modified by the locked commit."
   (interactive)
   (unless (blame-reveal-focus--active-p)
-    (user-error "Focus mode is not active. Press F to enter focus mode."))
+    (user-error "Focus mode is not active; use C-c C-l f to enter focus mode"))
 
   (let ((prev-block (blame-reveal-focus--find-next-block t)))
     (if prev-block
@@ -420,14 +420,6 @@ Called when blame-reveal-mode is disabled."
                  #'blame-reveal-focus--around-get-current-block)
   (advice-remove 'blame-reveal--should-show-sticky-header-p
                  #'blame-reveal-focus--around-should-show-sticky-header-p))
-
-;;; Keymap Extensions
-
-;; Add focus mode commands to main keymap
-(with-eval-after-load 'blame-reveal
-  (define-key blame-reveal-mode-map (kbd "F") #'blame-reveal-focus-commit)
-  (define-key blame-reveal-mode-map (kbd "n") #'blame-reveal-next-focus-block)
-  (define-key blame-reveal-mode-map (kbd "N") #'blame-reveal-prev-focus-block))
 
 ;;; Hooks Integration
 

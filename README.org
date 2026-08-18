@@ -42,7 +42,7 @@ When using ='auto= days limit, =blame-reveal-gradient-quality= tunes the balance
 
 *** Recursive Blame & Focus Mode
 
-Navigate line history through parent commits (=b=), or lock onto a single commit to see all its modifications across the file (=F=).
+Navigate line history through parent commits (=C-c C-l b=), or lock onto a single commit to see all its modifications across the file (=C-c C-l f=).
 
 ** Installation
 
@@ -82,7 +82,8 @@ Prefix keybindings (=C-c C-l=):
 | =C-c C-l g= | Blame at specific revision  |
 | =C-c C-l r= | Reset to HEAD               |
 | =C-c C-l f= | Toggle focus mode           |
-| =C-c C-l n= / =C-c C-l N= | Navigate focus blocks |
+| =C-c C-l n= | Next focus block            |
+| =C-c C-l N= | Previous focus block        |
 
 ** Configuration
 

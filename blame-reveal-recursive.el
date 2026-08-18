@@ -68,9 +68,11 @@ For example, abc123^ returns abc123."
   "Get short info string for COMMIT-HASH (for display)."
   (blame-reveal--with-git-env
    (with-temp-buffer
-     (when (zerop (call-process "git" nil t nil "show"
-                                "--no-patch" "--format=%h %s" commit-hash))
-       (string-trim (buffer-string))))))
+     (let ((coding-system-for-read 'utf-8)
+           (coding-system-for-write 'utf-8))
+       (when (zerop (call-process "git" nil t nil "show"
+                                  "--no-patch" "--format=%h %s" commit-hash))
+         (string-trim (buffer-string)))))))
 
 ;;; Helper Functions: Move/Copy Metadata
 
@@ -417,6 +419,8 @@ Returns (BLAME-DATA . MOVE-METADATA)."
                          (when range (cdr range))
                          relative-file
                          revision))
+                  (coding-system-for-read 'utf-8)
+                  (coding-system-for-write 'utf-8)
                   (exit-code (apply #'call-process "git" nil t nil args)))
              (message "Git command: git %s (exit: %d)" (mapconcat 'identity args " ") exit-code)
              (when (not (zerop exit-code))

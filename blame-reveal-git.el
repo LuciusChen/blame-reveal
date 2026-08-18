@@ -107,7 +107,9 @@ Returns (BLAME-DATA . MOVE-METADATA) on success, nil on failure."
                                              process-environment))))
         (with-temp-buffer
           (let ((args (blame-reveal--build-blame-command-args
-                       start-line end-line relative-file)))
+                       start-line end-line relative-file))
+                (coding-system-for-read 'utf-8)
+                (coding-system-for-write 'utf-8))
             (when (zerop (apply #'call-process "git" nil t nil args))
               (blame-reveal--parse-blame-output (current-buffer) relative-file))))))))
 
@@ -509,23 +511,25 @@ Returns t on success, nil on failure."
   "Get commit info for COMMIT-HASH.
 Returns (SHORT-HASH AUTHOR DATE SUMMARY TIMESTAMP DESCRIPTION)."
   (with-temp-buffer
-    (when (zerop (call-process "git" nil t nil "log"
-                               "--no-walk"
-                               "--no-patch"
-                               "--format=%h|%an|%ar|%s|%at%n--BODY--%n%b"
-                               commit-hash))
-      (goto-char (point-min))
-      (when (re-search-forward "\\([^|]+\\)|\\([^|]+\\)|\\([^|]+\\)|\\([^|]+\\)|\\([0-9]+\\)" nil t)
-        (let ((short-hash (match-string 1))
-              (author (match-string 2))
-              (date (match-string 3))
-              (summary (match-string 4))
-              (timestamp (string-to-number (match-string 5)))
-              (description ""))
-          ;; Parse description after --BODY-- marker
-          (when (re-search-forward "^--BODY--\n" nil t)
-            (setq description (string-trim (buffer-substring (point) (point-max)))))
-          (list short-hash author date summary timestamp description))))))
+    (let ((coding-system-for-read 'utf-8)
+          (coding-system-for-write 'utf-8))
+      (when (zerop (call-process "git" nil t nil "log"
+                                 "--no-walk"
+                                 "--no-patch"
+                                 "--format=%h|%an|%ar|%s|%at%n--BODY--%n%b"
+                                 commit-hash))
+        (goto-char (point-min))
+        (when (re-search-forward "\\([^|]+\\)|\\([^|]+\\)|\\([^|]+\\)|\\([^|]+\\)|\\([0-9]+\\)" nil t)
+          (let ((short-hash (match-string 1))
+                (author (match-string 2))
+                (date (match-string 3))
+                (summary (match-string 4))
+                (timestamp (string-to-number (match-string 5)))
+                (description ""))
+            ;; Parse description after --BODY-- marker
+            (when (re-search-forward "^--BODY--\n" nil t)
+              (setq description (string-trim (buffer-substring (point) (point-max)))))
+            (list short-hash author date summary timestamp description)))))))
 
 (defun blame-reveal--get-commits-info-batch (commit-hashes)
   "Batch retrieve info for multiple COMMIT-HASHES.
@@ -534,7 +538,9 @@ Returns alist of (COMMIT-HASH . INFO)."
     (with-temp-buffer
       (let ((args (append (list "show" "--no-patch" "--no-walk"
                                 "--format=%H%x00%h%x00%an%x00%ar%x00%s%x00%at%x00%b%x01")
-                          commit-hashes)))
+                          commit-hashes))
+            (coding-system-for-read 'utf-8)
+            (coding-system-for-write 'utf-8))
         (when (zerop (apply #'call-process "git" nil t nil args))
           (goto-char (point-min))
           (let ((results nil)

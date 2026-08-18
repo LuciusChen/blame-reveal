@@ -1064,6 +1064,8 @@ Uses idle timer to avoid blocking file opening."
   (blame-reveal--update-fringe-bitmap)
   ;; Hooks
   (add-hook 'after-save-hook #'blame-reveal--full-update nil t)
+  (add-hook 'revert-buffer-restore-functions
+            #'blame-reveal--revert-buffer-restore nil t)
   (add-hook 'window-scroll-functions #'blame-reveal--scroll-handler nil t)
   (add-hook 'post-command-hook #'blame-reveal--update-header nil t)
   (add-hook 'window-configuration-change-hook #'blame-reveal--render-visible-region nil t)
@@ -1072,11 +1074,62 @@ Uses idle timer to avoid blocking file opening."
   ;; Trigger Loading
   (blame-reveal--load-blame-data))
 
+(defun blame-reveal--clear-buffer-state-for-revert ()
+  "Clear blame-reveal display and data before a file buffer is reverted.
+This runs before `normal-mode' can discard buffer-local state, so all
+managed overlays and header state are removed while their registry is
+still available."
+  (when (blame-reveal--state-is-busy-p)
+    (blame-reveal--state-cancel "buffer reverted"))
+  (blame-reveal--stop-loading-animation)
+  (when (timerp blame-reveal--scroll-timer)
+    (cancel-timer blame-reveal--scroll-timer)
+    (setq blame-reveal--scroll-timer nil))
+  ;; Header overlays are not part of the managed-overlay registry.  Clear
+  ;; their state first, then remove any raw header overlays immediately.
+  (blame-reveal--clear-header-state)
+  (save-restriction
+    (widen)
+    (dolist (overlay (overlays-in (point-min) (point-max)))
+      (when (overlay-get overlay 'blame-reveal)
+        (delete-overlay overlay))))
+  (blame-reveal--clear-all-overlays)
+  (setq blame-reveal--pending-delete-overlays nil
+        blame-reveal--blame-data nil
+        blame-reveal--blame-data-range nil
+        blame-reveal--commit-info nil
+        blame-reveal--color-map nil
+        blame-reveal--timestamps nil
+        blame-reveal--recent-commits nil
+        blame-reveal--all-commits-loaded nil
+        blame-reveal--current-line-cache nil
+        blame-reveal--last-window-start nil
+        blame-reveal--last-update-line nil))
+
+(defun blame-reveal--revert-buffer-restore ()
+  "Prepare and restore blame-reveal around a normal file-buffer revert.
+The restoration function returned here runs after `normal-mode' has
+finished, without toggling `blame-reveal-mode'."
+  (when (and blame-reveal-mode (buffer-file-name))
+    (let ((buffer (current-buffer)))
+      (blame-reveal--clear-buffer-state-for-revert)
+      (lambda ()
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer
+            (when (buffer-file-name)
+              ;; `normal-mode' clears minor-mode locals during a regular
+              ;; revert; restore the active mode directly rather than
+              ;; restarting it through `blame-reveal-mode'.
+              (setq-local blame-reveal-mode t)
+              (blame-reveal--setup-buffer-resources))))))))
+
 (defun blame-reveal--cleanup-buffer-resources ()
   "Completely tear down all blame-reveal resources for the current buffer.
 Handles Hooks, Timers, Overlays, and State."
   ;; Remove Hooks (First, stop reacting to events)
   (remove-hook 'after-save-hook #'blame-reveal--full-update t)
+  (remove-hook 'revert-buffer-restore-functions
+               #'blame-reveal--revert-buffer-restore t)
   (remove-hook 'window-scroll-functions #'blame-reveal--scroll-handler t)
   (remove-hook 'post-command-hook #'blame-reveal--update-header t)
   (remove-hook 'window-configuration-change-hook #'blame-reveal--render-visible-region t)
